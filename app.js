@@ -67,20 +67,22 @@ function teamFields() {
 }
 
 function setupSummary() {
-  const mode = draft.mode === 'classic' ? 'Классический' : 'Наш';
+  const mode = draft.mode === 'classic' ? 'Классический' : 'Кастом';
+  const roundScoring = draft.mode === 'custom' && draft.scoreMode === 'round';
   const timer = draft.mode === 'classic' ? '1 минута на все слова команды' : draft.timerMode === 'round' ? `${formatTime(draft.roundSeconds * 1000)} на все слова команды` : `${formatTime(draft.wordSeconds * 1000)} на каждое слово`;
-  const pool = WORDS.filter(word => !seen.has(word.family) && (draft.mode === 'classic' || (draft.category === 'all' || word.category === draft.category) && (draft.difficulty === 'mixed' || word.difficulty === draft.difficulty)));
+  const selectedWords = WORDS.filter(word => draft.mode === 'classic' || (draft.category === 'all' || word.category === draft.category) && (draft.difficulty === 'mixed' || word.difficulty === draft.difficulty));
+  const pool = selectedWords.filter(word => !seen.has(word.family));
   return `<aside class="panel setup-summary"><span class="mini-pill">✦ Перед стартом</span><h3>Ваша следующая игровая ночь</h3>
     <div class="summary-rule"><span>Режим</span><strong>${mode}</strong></div>
     <div class="summary-rule"><span>Команды</span><strong>${draft.teams.length}</strong></div>
     <div class="summary-rule"><span>Таймер</span><strong>${esc(timer)}</strong></div>
-    <div class="summary-rule"><span>Победа</span><strong>${draft.mode === 'custom' && draft.scoreMode === 'round' ? 'по словам за раунд' : `${draft.targetScore} очков`}</strong></div>
-    <div class="summary-rule"><span>Новых слов</span><strong>${pool.length}</strong></div>
-    <div class="remaining-bar"><i style="width:${Math.max(3, pool.length / WORDS.length * 100)}%"></i></div>
-    <p class="field-note">Показанные слова не повторяются на этом устройстве.</p>
+    <div class="summary-rule"><span>${roundScoring ? 'Итог раунда' : 'Финиш партии'}</span><strong>${roundScoring ? 'кто больше угадал' : `${draft.targetScore} очков`}</strong></div>
+    <div class="summary-rule"><span>Не показано слов</span><strong>${pool.length}</strong></div>
+    <div class="remaining-bar"><i style="width:${selectedWords.length ? pool.length / selectedWords.length * 100 : 0}%"></i></div>
+    <p class="field-note">Слова берутся из встроенного набора. Счётчик показывает, сколько ещё не встречалось в выбранной теме и сложности.</p>
     <div class="setup-footer"><button class="button button-primary button-full button-large" data-action="start-game">Начать партию ↗</button><div id="setup-error"></div></div>
-    <details class="history-panel"><summary>История слов</summary><div class="settings-tools"><button class="button button-ghost button-small" data-action="export-history">Сохранить</button>
-      <button class="button button-ghost button-small" data-action="import-history">Восстановить</button><input type="file" id="history-file" accept="application/json,.json"></div></details>
+    <details class="history-panel"><summary>История слов</summary><p class="field-note">Сайт запоминает показанные слова в этом браузере, чтобы не выдать их снова в другой партии. Скачайте историю, если хотите перенести её на другой телефон или сохранить перед очисткой браузера. Загрузка добавит использованные слова, но не перенесёт текущую партию.</p><div class="settings-tools"><button class="button button-ghost button-small" data-action="export-history">Скачать историю</button>
+      <button class="button button-ghost button-small" data-action="import-history">Загрузить историю</button><input type="file" id="history-file" accept="application/json,.json"></div></details>
   </aside>`;
 }
 
@@ -89,7 +91,7 @@ function renderSetup() {
     <div class="setup-grid"><div class="stack">
       <section class="panel"><div class="panel-head"><h3><span class="step">1</span> Правила</h3></div>
         <div class="mode-grid"><button class="mode-card ${draft.mode === 'classic' ? 'active' : ''}" data-action="set-mode" data-value="classic"><span class="mode-icon">⌛</span><strong>Классический</strong><small>1 минута на все слова команды. Очки копятся до финиша.</small></button>
-        <button class="mode-card ${draft.mode === 'custom' ? 'active' : ''}" data-action="set-mode" data-value="custom"><span class="mode-icon">⚡</span><strong>Наш режим</strong><small>Каждой команде своё время. Побеждает лучшая за раунд.</small></button></div>
+        <button class="mode-card ${draft.mode === 'custom' ? 'active' : ''}" data-action="set-mode" data-value="custom"><span class="mode-icon">⚡</span><strong>Кастом</strong><small>Свои настройки времени, темы и подсчёта очков.</small></button></div>
       </section>
       <section class="panel"><div class="panel-head"><h3><span class="step">2</span> Участники</h3><span class="mini-pill">от 2 на команду</span></div>
         <div class="team-grid">${teamFields()}</div><button class="link-button" data-action="add-team" ${draft.teams.length >= 6 ? 'disabled' : ''}>+ Добавить команду</button>
@@ -116,7 +118,7 @@ function renderScores() {
 
 function gameHeader() {
   const roundScoring = game.mode === 'custom' && game.scoreMode === 'round';
-  return `${header()}<div class="game-top"><div class="game-kicker"><span>${roundScoring ? `РАУНД ${game.roundNumber || 1}` : 'ПАРТИЯ'}</span><span>→</span><b>${game.mode === 'classic' ? 'Классический' : 'Наш режим'}</b></div><span class="mini-pill">${roundScoring ? 'Слова за раунд' : `Финиш: ${game.targetScore}`}</span></div>${renderScores()}`;
+  return `${header()}<div class="game-top"><div class="game-kicker"><span>${roundScoring ? `РАУНД ${game.roundNumber || 1}` : 'ПАРТИЯ'}</span><span>→</span><b>${game.mode === 'classic' ? 'Классический' : 'Кастом'}</b></div><span class="mini-pill">${roundScoring ? 'Слова за раунд' : `Финиш: ${game.targetScore}`}</span></div>${renderScores()}`;
 }
 
 function roleNames() {
@@ -483,7 +485,7 @@ async function init() {
     }
     render();
     requestPersistentStorage();
-    if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js?v=7').catch(console.warn);
+    if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js?v=8').catch(console.warn);
   } catch (error) {
     console.error(error);
     root.innerHTML = `${header()}<div class="panel"><h1>Не удалось открыть память игры</h1><p>Проверьте, что браузер разрешает хранить данные сайта, и перезагрузите страницу.</p></div>`;
