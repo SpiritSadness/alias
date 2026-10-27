@@ -121,19 +121,17 @@ function gameHeader() {
 
 function roleNames() {
   const team = activeTeam();
-  return { explainer: team.players[game.roles.explainer], guesser: team.players[game.roles.guesser] };
+  return { explainer: team.players[game.roles.explainer] };
 }
 
 function renderHandoff() {
   const team = activeTeam();
-  const { explainer, guesser } = roleNames();
+  const { explainer } = roleNames();
   const special = game.mode === 'classic' && team.stealNext;
   return `${gameHeader()}<main class="game-frame"><div class="turn-card center"><div class="eyebrow">${game.mode === 'custom' && game.scoreMode === 'round' ? `Раунд ${game.roundNumber || 1}` : `Ход ${team.turns + 1}`} · ${esc(team.name)}</div>
     <div class="turn-emoji">${special ? '⚡' : '🎤'}</div><h1>${special ? 'Ход перехвата!' : 'Ваша очередь!'}</h1>
     <p>${special ? 'Пять слов без таймера. Угадывать могут все команды.' : 'Передайте телефон объясняющему. Слово появится после старта.'}</p>
-    <div class="pair-line">${esc(explainer)} <span class="pair-arrow">→</span> ${game.mode === 'classic' ? 'вся команда' : esc(guesser)}</div>
-    <div class="form-row"><label class="field"><span>Кто объясняет</span><select data-field="role-explainer">${team.players.map((name, index) => `<option value="${index}" ${game.roles.explainer === index ? 'selected' : ''}>${esc(name)}</option>`).join('')}</select></label>
-    ${game.mode === 'custom' ? `<label class="field"><span>Кто угадывает</span><select data-field="role-guesser">${team.players.map((name, index) => `<option value="${index}" ${game.roles.guesser === index ? 'selected' : ''}>${esc(name)}</option>`).join('')}</select></label>` : ''}</div>
+    <div class="pair-line">${esc(explainer)} <span class="pair-arrow">→</span> вся команда</div>
     <button class="button button-primary button-large button-full" data-action="start-turn">Показать слово →</button></div></main>`;
 }
 
@@ -244,10 +242,11 @@ function validateDraft() {
 }
 
 function defaultRoles(team) {
-  const length = team.players.length;
-  const explainer = team.turns % length;
-  const offset = 1 + Math.floor(team.turns / length) % (length - 1);
-  return { explainer, guesser: (explainer + offset) % length };
+  return { explainer: ((team.explainerStart ?? 0) + team.turns) % team.players.length };
+}
+
+function randomExplainer(team) {
+  return Math.floor(Math.random() * team.players.length);
 }
 
 function poolForTurn() {
@@ -269,7 +268,6 @@ async function nextWord() {
 }
 
 async function startTurn() {
-  if (game.mode === 'custom' && game.roles.explainer === game.roles.guesser) throw new Error('Объясняющий и угадывающий должны быть разными людьми');
   const team = activeTeam();
   game.special = game.mode === 'classic' && team.stealNext;
   team.stealNext = false;
@@ -382,11 +380,12 @@ async function handleAction(action, button) {
     if (error) { root.querySelector('#setup-error').innerHTML = `<div class="error-box">${esc(error)}</div>`; return; }
     game = {
       ...structuredClone(draft),
-      teams: draft.teams.map(team => ({ ...structuredClone(team), score: 0, turns: 0, stealNext: false })),
-      activeTeam: 0, phase: 'handoff', roles: { explainer: 0, guesser: 1 }, roundNumber: 1,
+      teams: draft.teams.map(team => ({ ...structuredClone(team), score: 0, turns: 0, stealNext: false, explainerStart: randomExplainer(team) })),
+      activeTeam: 0, phase: 'handoff', roles: null, roundNumber: 1,
       actions: [], word: null, timer: null, special: false, specialPlayed: 0,
       createdAt: new Date().toISOString()
     };
+    game.roles = defaultRoles(activeTeam());
     view = 'game'; await saveGame(game); render(); return;
   }
   if (action === 'start-turn') return startTurn();
@@ -463,10 +462,7 @@ root.addEventListener('change', event => {
   if (field === 'category') draft.category = input.value;
   if (field === 'difficulty') draft.difficulty = input.value;
   if (field === 'skip-penalty') draft.skipPenalty = Number(input.value);
-  if (field === 'role-explainer' && game) game.roles.explainer = Number(input.value);
-  if (field === 'role-guesser' && game) game.roles.guesser = Number(input.value);
-  if (field?.startsWith('role-')) run(async () => { await saveGame(game); render(); });
-  else if (view === 'setup') render();
+  if (view === 'setup') render();
 });
 
 setInterval(() => {
@@ -479,9 +475,14 @@ async function init() {
   try {
     seen = await getSeen();
     game = await getGame();
+    if (game?.teams.some(team => team.explainerStart == null)) {
+      game.teams.forEach(team => { if (team.explainerStart == null) team.explainerStart = randomExplainer(team); });
+      if (game.phase === 'handoff' || game.phase === 'round' || game.phase === 'roundResult') game.roles = defaultRoles(activeTeam());
+      await saveGame(game);
+    }
     render();
     requestPersistentStorage();
-    if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js?v=5').catch(console.warn);
+    if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js?v=6').catch(console.warn);
   } catch (error) {
     console.error(error);
     root.innerHTML = `${header()}<div class="panel"><h1>Не удалось открыть память игры</h1><p>Проверьте, что браузер разрешает хранить данные сайта, и перезагрузите страницу.</p></div>`;
