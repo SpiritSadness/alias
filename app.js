@@ -13,8 +13,8 @@ let view = 'home';
 let busy = false;
 let toastTimer;
 let draft = {
-  mode: 'classic', timerMode: 'round', roundSeconds: 60, wordSeconds: 30,
-  targetScore: 30, category: 'all', difficulty: 'mixed', skipPenalty: 0,
+  mode: 'classic', timerMode: 'round', roundSeconds: 120, wordSeconds: 30,
+  scoreMode: 'round', targetScore: 30, category: 'all', difficulty: 'mixed', skipPenalty: 0,
   teams: [
     { id: 'team-a', name: 'Команда 1', players: ['Аня', 'Паша'] },
     { id: 'team-b', name: 'Команда 2', players: ['Маша', 'Илья'] }
@@ -68,13 +68,13 @@ function teamFields() {
 
 function setupSummary() {
   const mode = draft.mode === 'classic' ? 'Классический' : 'Наш';
-  const timer = draft.mode === 'classic' ? '60 сек / ход' : draft.timerMode === 'round' ? `${draft.roundSeconds} сек / ход` : `${draft.wordSeconds} сек / слово`;
+  const timer = draft.mode === 'classic' ? '1 минута на все слова команды' : draft.timerMode === 'round' ? `${formatTime(draft.roundSeconds * 1000)} на все слова команды` : `${formatTime(draft.wordSeconds * 1000)} на каждое слово`;
   const pool = WORDS.filter(word => !seen.has(word.family) && (draft.mode === 'classic' || (draft.category === 'all' || word.category === draft.category) && (draft.difficulty === 'mixed' || word.difficulty === draft.difficulty)));
   return `<aside class="panel setup-summary"><span class="mini-pill">✦ Перед стартом</span><h3>Ваша следующая игровая ночь</h3>
     <div class="summary-rule"><span>Режим</span><strong>${mode}</strong></div>
     <div class="summary-rule"><span>Команды</span><strong>${draft.teams.length}</strong></div>
     <div class="summary-rule"><span>Таймер</span><strong>${esc(timer)}</strong></div>
-    <div class="summary-rule"><span>Победа</span><strong>${draft.targetScore} очков</strong></div>
+    <div class="summary-rule"><span>Победа</span><strong>${draft.mode === 'custom' && draft.scoreMode === 'round' ? 'по словам за раунд' : `${draft.targetScore} очков`}</strong></div>
     <div class="summary-rule"><span>Новых слов</span><strong>${pool.length}</strong></div>
     <div class="remaining-bar"><i style="width:${Math.max(3, pool.length / WORDS.length * 100)}%"></i></div>
     <p class="field-note">Показанные слова не повторяются на этом устройстве.</p>
@@ -88,18 +88,21 @@ function renderSetup() {
   return `${header()}<main><div class="section-head"><div><div class="eyebrow">Настройка партии</div><h1>Соберите команду.</h1><p>Несколько решений — и можно играть.</p></div></div>
     <div class="setup-grid"><div class="stack">
       <section class="panel"><div class="panel-head"><h3><span class="step">1</span> Правила</h3></div>
-        <div class="mode-grid"><button class="mode-card ${draft.mode === 'classic' ? 'active' : ''}" data-action="set-mode" data-value="classic"><span class="mode-icon">⌛</span><strong>Классический</strong><small>Минута на ход, штрафы и перехват слов.</small></button>
-        <button class="mode-card ${draft.mode === 'custom' ? 'active' : ''}" data-action="set-mode" data-value="custom"><span class="mode-icon">⚡</span><strong>Наш режим</strong><small>Пары, свои темы и удобный таймер.</small></button></div>
+        <div class="mode-grid"><button class="mode-card ${draft.mode === 'classic' ? 'active' : ''}" data-action="set-mode" data-value="classic"><span class="mode-icon">⌛</span><strong>Классический</strong><small>1 минута на все слова команды. Очки копятся до финиша.</small></button>
+        <button class="mode-card ${draft.mode === 'custom' ? 'active' : ''}" data-action="set-mode" data-value="custom"><span class="mode-icon">⚡</span><strong>Наш режим</strong><small>Каждой команде своё время. Побеждает лучшая за раунд.</small></button></div>
       </section>
       <section class="panel"><div class="panel-head"><h3><span class="step">2</span> Участники</h3><span class="mini-pill">от 2 на команду</span></div>
         <div class="team-grid">${teamFields()}</div><button class="link-button" data-action="add-team" ${draft.teams.length >= 6 ? 'disabled' : ''}>+ Добавить команду</button>
       </section>
       <section class="panel"><div class="panel-head"><h3><span class="step">3</span> Темп игры</h3></div>
         ${draft.mode === 'custom' ? `<div class="field" style="margin-bottom:16px"><span>Таймер</span><div class="segmented">
-          <button class="${draft.timerMode === 'round' ? 'active' : ''}" data-action="set-timer-mode" data-value="round">На весь ход</button>
-          <button class="${draft.timerMode === 'word' ? 'active' : ''}" data-action="set-timer-mode" data-value="word">На слово</button></div></div>` : '<p class="field-note">В классическом режиме ход длится 60 секунд. Сколько слов успеете — столько и объясните.</p>'}
-        <div class="field-grid"><label class="field"><span>Игра до очков</span><input type="number" min="5" max="200" data-field="target-score" value="${draft.targetScore}"></label>
-        ${draft.mode === 'custom' ? `<label class="field"><span>${draft.timerMode === 'round' ? 'Секунд на ход' : 'Секунд на слово'}</span><input type="number" min="10" max="600" data-field="${draft.timerMode === 'round' ? 'round-seconds' : 'word-seconds'}" value="${draft.timerMode === 'round' ? draft.roundSeconds : draft.wordSeconds}"></label>` : ''}
+          <button class="${draft.timerMode === 'round' ? 'active' : ''}" data-action="set-timer-mode" data-value="round">На все слова команды</button>
+          <button class="${draft.timerMode === 'word' ? 'active' : ''}" data-action="set-timer-mode" data-value="word">На каждое слово</button></div></div>
+          <div class="field" style="margin-bottom:16px"><span>Как определить победителя</span><div class="segmented">
+          <button class="${draft.scoreMode === 'round' ? 'active' : ''}" data-action="set-score-mode" data-value="round">По итогам раунда</button>
+          <button class="${draft.scoreMode === 'target' ? 'active' : ''}" data-action="set-score-mode" data-value="target">До нужных очков</button></div></div>` : '<p class="field-note">У каждой команды 1 минута, чтобы угадать как можно больше слов. Очки суммируются до финиша.</p>'}
+        <div class="field-grid">${draft.mode === 'classic' || draft.scoreMode === 'target' ? `<label class="field"><span>Игра до очков</span><input type="number" min="5" max="200" data-field="target-score" value="${draft.targetScore}"></label>` : ''}
+        ${draft.mode === 'custom' ? `<label class="field"><span>${draft.timerMode === 'round' ? 'Секунд на все слова команды' : 'Секунд на каждое слово'}</span><input type="number" min="10" max="600" data-field="${draft.timerMode === 'round' ? 'round-seconds' : 'word-seconds'}" value="${draft.timerMode === 'round' ? draft.roundSeconds : draft.wordSeconds}"></label>` : ''}
         ${draft.mode === 'custom' ? `<label class="field"><span>Тема</span><select data-field="category"><option value="all" ${draft.category === 'all' ? 'selected' : ''}>Все темы</option>${PACKS.map(pack => `<option value="${pack.id}" ${draft.category === pack.id ? 'selected' : ''}>${pack.emoji} ${pack.name}</option>`).join('')}</select></label>
         <label class="field"><span>Сложность</span><select data-field="difficulty"><option value="mixed" ${draft.difficulty === 'mixed' ? 'selected' : ''}>Смешанная</option><option value="easy" ${draft.difficulty === 'easy' ? 'selected' : ''}>Лёгкая</option><option value="medium" ${draft.difficulty === 'medium' ? 'selected' : ''}>Средняя</option><option value="hard" ${draft.difficulty === 'hard' ? 'selected' : ''}>Сложная</option></select></label>
         <label class="field"><span>Штраф за пропуск</span><select data-field="skip-penalty"><option value="0" ${draft.skipPenalty === 0 ? 'selected' : ''}>Без штрафа</option><option value="1" ${draft.skipPenalty === 1 ? 'selected' : ''}>−1 очко</option></select></label>` : ''}</div>
@@ -108,11 +111,12 @@ function renderSetup() {
 }
 
 function renderScores() {
-  return `<div class="score-strip" aria-label="Счёт команд">${game.teams.map((team, index) => `<div class="score-item ${index === game.activeTeam ? 'active' : ''}"><span><i class="status-dot" style="display:inline-block;background:${colors[index % colors.length]};box-shadow:none;margin-right:6px"></i>${esc(team.name)}</span><strong>${team.score}</strong></div>`).join('')}</div>`;
+  return `<div class="score-strip" aria-label="${game.mode === 'custom' && game.scoreMode === 'round' ? 'Слова в этом раунде' : 'Счёт команд'}">${game.teams.map((team, index) => `<div class="score-item ${index === game.activeTeam ? 'active' : ''}"><span><i class="status-dot" style="display:inline-block;background:${colors[index % colors.length]};box-shadow:none;margin-right:6px"></i>${esc(team.name)}</span><strong>${team.score}</strong></div>`).join('')}</div>`;
 }
 
 function gameHeader() {
-  return `${header()}<div class="game-top"><div class="game-kicker"><span>ПАРТИЯ</span><span>→</span><b>${game.mode === 'classic' ? 'Классический' : 'Наш режим'}</b></div><span class="mini-pill">Финиш: ${game.targetScore}</span></div>${renderScores()}`;
+  const roundScoring = game.mode === 'custom' && game.scoreMode === 'round';
+  return `${header()}<div class="game-top"><div class="game-kicker"><span>${roundScoring ? `РАУНД ${game.roundNumber || 1}` : 'ПАРТИЯ'}</span><span>→</span><b>${game.mode === 'classic' ? 'Классический' : 'Наш режим'}</b></div><span class="mini-pill">${roundScoring ? 'Слова за раунд' : `Финиш: ${game.targetScore}`}</span></div>${renderScores()}`;
 }
 
 function roleNames() {
@@ -124,7 +128,7 @@ function renderHandoff() {
   const team = activeTeam();
   const { explainer, guesser } = roleNames();
   const special = game.mode === 'classic' && team.stealNext;
-  return `${gameHeader()}<main class="game-frame"><div class="turn-card center"><div class="eyebrow">Ход ${team.turns + 1} · ${esc(team.name)}</div>
+  return `${gameHeader()}<main class="game-frame"><div class="turn-card center"><div class="eyebrow">${game.mode === 'custom' && game.scoreMode === 'round' ? `Раунд ${game.roundNumber || 1}` : `Ход ${team.turns + 1}`} · ${esc(team.name)}</div>
     <div class="turn-emoji">${special ? '⚡' : '🎤'}</div><h1>${special ? 'Ход перехвата!' : 'Ваша очередь!'}</h1>
     <p>${special ? 'Пять слов без таймера. Угадывать могут все команды.' : 'Передайте телефон объясняющему. Слово появится после старта.'}</p>
     <div class="pair-line">${esc(explainer)} <span class="pair-arrow">→</span> ${game.mode === 'classic' ? 'вся команда' : esc(guesser)}</div>
@@ -135,7 +139,7 @@ function renderHandoff() {
 
 function renderTimer() {
   if (game.special) return `<div class="timer-line"><span class="timer-label">⚡ Ход перехвата</span><span class="timer-value">${game.specialPlayed}/5</span></div>`;
-  return `<div class="timer-line"><span class="timer-label">◷ ${game.mode === 'custom' && game.timerMode === 'word' ? 'На это слово' : 'Осталось на ход'}</span><span class="timer-value" id="timer-value">${formatTime(timerLeft())}</span></div>
+  return `<div class="timer-line"><span class="timer-label">◷ ${game.mode === 'custom' && game.timerMode === 'word' ? 'На это слово' : 'На все слова команды'}</span><span class="timer-value" id="timer-value">${formatTime(timerLeft())}</span></div>
     <div class="timer-track"><div class="timer-fill" id="timer-fill"></div></div>`;
 }
 
@@ -175,6 +179,16 @@ function renderRound() {
     <button class="button button-primary button-large button-full" data-action="next-turn">Передать ход →</button></div></main>`;
 }
 
+function renderRoundResult() {
+  const best = Math.max(...game.teams.map(team => team.score));
+  const winners = game.teams.filter(team => team.score === best);
+  return `${gameHeader()}<main class="game-frame"><div class="turn-card center"><div class="finish-trophy">★</div><div class="eyebrow">Раунд ${game.roundNumber || 1} завершён</div>
+    <h1>${winners.length === 1 ? `${esc(winners[0].name)} выиграла раунд!` : 'Ничья в раунде!'}</h1>
+    <p>${game.teams.map(team => `${esc(team.name)} — ${team.score} ${team.score === 1 ? 'слово' : team.score >= 2 && team.score <= 4 ? 'слова' : 'слов'}`).join(' · ')}</p>
+    <p class="fine-print">Победитель определяется только по словам этого раунда. В следующем счёт начнётся с нуля.</p>
+    <div class="game-actions"><button class="button button-primary button-large" data-action="new-round">Следующий раунд ↗</button><button class="button button-secondary button-large" data-action="new-game">Новая игра</button></div></div></main>`;
+}
+
 function renderFinished() {
   const winner = game.teams.reduce((best, team) => team.score > best.score ? team : best, game.teams[0]);
   return `${gameHeader()}<main class="game-frame"><div class="turn-card center"><div class="finish-trophy">★</div><div class="eyebrow">Партия завершена</div>
@@ -191,7 +205,7 @@ function renderEmpty() {
 function render() {
   root.innerHTML = view === 'home' ? renderHome() : view === 'setup' ? renderSetup() : game ? (
     game.phase === 'handoff' ? renderHandoff() : game.phase === 'playing' ? renderPlaying() :
-    game.phase === 'lastWord' ? renderLastWord() : game.phase === 'round' ? renderRound() :
+    game.phase === 'lastWord' ? renderLastWord() : game.phase === 'round' ? renderRound() : game.phase === 'roundResult' ? renderRoundResult() :
     game.phase === 'finished' ? renderFinished() : renderEmpty()
   ) : renderHome();
   updateTimer();
@@ -222,7 +236,7 @@ function validateDraft() {
   if (draft.teams.some(team => !team.name.trim()) || names.some(name => !name)) return 'Заполните названия команд и имена участников.';
   if (new Set(names).size !== names.length) return 'Участников с одинаковыми именами будет сложно различать. Переименуйте их.';
   if (new Set(draft.teams.map(team => team.name.trim().toLocaleLowerCase('ru'))).size !== draft.teams.length) return 'Названия команд должны различаться.';
-  if (draft.targetScore < 5 || draft.targetScore > 200) return 'Цель по очкам должна быть от 5 до 200.';
+  if ((draft.mode === 'classic' || draft.scoreMode === 'target') && (draft.targetScore < 5 || draft.targetScore > 200)) return 'Цель по очкам должна быть от 5 до 200.';
   if (draft.mode === 'custom' && (draft.timerMode === 'round' ? draft.roundSeconds : draft.wordSeconds) < 10) return 'Минимальное время — 10 секунд.';
   const pool = WORDS.filter(word => !seen.has(word.family) && (draft.mode === 'classic' || (draft.category === 'all' || word.category === draft.category) && (draft.difficulty === 'mixed' || word.difficulty === draft.difficulty)));
   if (!pool.length) return 'В этом наборе больше нет новых слов. Выберите другую тему или сложность.';
@@ -331,7 +345,8 @@ async function finishTurn() {
   game.special = false;
   game.activeTeam = (game.activeTeam + 1) % game.teams.length;
   const leaders = game.teams.filter(item => item.score === Math.max(...game.teams.map(t => t.score)));
-  if (game.activeTeam === 0 && leaders.length === 1 && leaders[0].score >= game.targetScore) game.phase = 'finished';
+  if (game.activeTeam === 0 && game.mode === 'custom' && game.scoreMode === 'round') game.phase = 'roundResult';
+  else if (game.activeTeam === 0 && leaders.length === 1 && leaders[0].score >= game.targetScore) game.phase = 'finished';
   else game.phase = 'round';
   game.roles = defaultRoles(activeTeam());
   await saveGame(game);
@@ -354,6 +369,7 @@ async function handleAction(action, button) {
   if (action === 'resume-game') { view = 'game'; render(); return; }
   if (action === 'set-mode') { draft.mode = button.dataset.value; render(); return; }
   if (action === 'set-timer-mode') { draft.timerMode = button.dataset.value; render(); return; }
+  if (action === 'set-score-mode') { draft.scoreMode = button.dataset.value; render(); return; }
   if (action === 'add-team') {
     if (draft.teams.length < 6) draft.teams.push({ id: crypto.randomUUID(), name: `Команда ${draft.teams.length + 1}`, players: ['', ''] });
     render(); return;
@@ -367,7 +383,7 @@ async function handleAction(action, button) {
     game = {
       ...structuredClone(draft),
       teams: draft.teams.map(team => ({ ...structuredClone(team), score: 0, turns: 0, stealNext: false })),
-      activeTeam: 0, phase: 'handoff', roles: { explainer: 0, guesser: 1 },
+      activeTeam: 0, phase: 'handoff', roles: { explainer: 0, guesser: 1 }, roundNumber: 1,
       actions: [], word: null, timer: null, special: false, specialPlayed: 0,
       createdAt: new Date().toISOString()
     };
@@ -383,6 +399,13 @@ async function handleAction(action, button) {
   }
   if (action === 'end-turn') return finishTurn();
   if (action === 'next-turn') { game.phase = 'handoff'; await saveGame(game); render(); return; }
+  if (action === 'new-round' && game.phase === 'roundResult') {
+    game.roundNumber = (game.roundNumber || 1) + 1;
+    game.teams.forEach(team => { team.score = 0; });
+    game.activeTeam = 0; game.roles = defaultRoles(activeTeam()); game.phase = 'handoff';
+    game.lastSummary = null;
+    await saveGame(game); render(); return;
+  }
   if (action === 'pause-timer') {
     game.timer.remainingMs = timerLeft(); game.timer.paused = true; game.timer.deadline = null;
     await saveGame(game); render(); return;
@@ -458,7 +481,7 @@ async function init() {
     game = await getGame();
     render();
     requestPersistentStorage();
-    if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js?v=4').catch(console.warn);
+    if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js?v=5').catch(console.warn);
   } catch (error) {
     console.error(error);
     root.innerHTML = `${header()}<div class="panel"><h1>Не удалось открыть память игры</h1><p>Проверьте, что браузер разрешает хранить данные сайта, и перезагрузите страницу.</p></div>`;
