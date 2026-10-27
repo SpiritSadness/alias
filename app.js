@@ -458,7 +458,7 @@ async function init() {
     game = await getGame();
     render();
     requestPersistentStorage();
-    if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(console.warn);
+    if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js?v=4').catch(console.warn);
   } catch (error) {
     console.error(error);
     root.innerHTML = `${header()}<div class="panel"><h1>Не удалось открыть память игры</h1><p>Проверьте, что браузер разрешает хранить данные сайта, и перезагрузите страницу.</p></div>`;
