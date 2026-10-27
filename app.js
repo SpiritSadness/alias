@@ -1,4 +1,4 @@
-import { PACKS, WORDS } from './words.js';
+import { PACKS, WORDS } from './words.js?v=11';
 import { getSeen, reserveWord, getGame, saveGame, removeGame, exportSeen, importSeen, requestPersistentStorage } from './storage.js';
 
 const root = document.querySelector('#app');
@@ -159,7 +159,6 @@ function renderPlaying() {
       ${game.mode === 'classic' && !game.special && !game.timer?.paused ? '<button data-action="mistake">Ошибка −1</button>' : ''}
       <button data-action="undo" ${lastAction ? '' : 'disabled'}>↶ Отменить очки</button>
       ${game.timer && !game.timer?.paused ? '<button data-action="end-turn">Завершить ход</button>' : ''}</div>
-    <div class="answer-log">${lastAction ? `Последнее действие: <b>${esc(lastAction.label)}</b>. Слово уже показано и не вернётся в колоду.` : 'Карточка засчитывается использованной сразу после показа.'}</div>
   </div></main>`;
 }
 
@@ -345,8 +344,8 @@ async function finishTurn() {
   game.special = false;
   game.activeTeam = (game.activeTeam + 1) % game.teams.length;
   const leaders = game.teams.filter(item => item.score === Math.max(...game.teams.map(t => t.score)));
-  if (game.activeTeam === 0 && game.mode === 'custom' && game.scoreMode === 'round') game.phase = 'roundResult';
-  else if (game.activeTeam === 0 && leaders.length === 1 && leaders[0].score >= game.targetScore) game.phase = 'finished';
+  if (game.activeTeam === game.roundStartTeam && game.mode === 'custom' && game.scoreMode === 'round') game.phase = 'roundResult';
+  else if (game.activeTeam === game.roundStartTeam && leaders.length === 1 && leaders[0].score >= game.targetScore) game.phase = 'finished';
   else game.phase = 'round';
   game.roles = defaultRoles(activeTeam());
   await saveGame(game);
@@ -383,10 +382,11 @@ async function handleAction(action, button) {
     game = {
       ...structuredClone(draft),
       teams: draft.teams.map(team => ({ ...structuredClone(team), score: 0, turns: 0, stealNext: false, explainerStart: randomExplainer(team) })),
-      activeTeam: 0, phase: 'handoff', roles: null, roundNumber: 1,
+      activeTeam: Math.floor(Math.random() * draft.teams.length), phase: 'handoff', roles: null, roundNumber: 1,
       actions: [], word: null, timer: null, special: false, specialPlayed: 0,
       createdAt: new Date().toISOString()
     };
+    game.roundStartTeam = game.activeTeam;
     game.roles = defaultRoles(activeTeam());
     view = 'game'; await saveGame(game); render(); return;
   }
@@ -403,7 +403,8 @@ async function handleAction(action, button) {
   if (action === 'new-round' && game.phase === 'roundResult') {
     game.roundNumber = (game.roundNumber || 1) + 1;
     game.teams.forEach(team => { team.score = 0; });
-    game.activeTeam = 0; game.roles = defaultRoles(activeTeam()); game.phase = 'handoff';
+    game.roundStartTeam = (game.roundStartTeam + 1) % game.teams.length;
+    game.activeTeam = game.roundStartTeam; game.roles = defaultRoles(activeTeam()); game.phase = 'handoff';
     game.lastSummary = null;
     await saveGame(game); render(); return;
   }
@@ -477,6 +478,10 @@ async function init() {
   try {
     seen = await getSeen();
     game = await getGame();
+    if (game && game.roundStartTeam == null) {
+      game.roundStartTeam = 0;
+      await saveGame(game);
+    }
     if (game?.teams.some(team => team.explainerStart == null)) {
       // Старые партии уже шли по порядку от первого участника: сохраняем этот круг без повторов.
       game.teams.forEach(team => { if (team.explainerStart == null) team.explainerStart = 0; });
@@ -485,7 +490,7 @@ async function init() {
     }
     render();
     requestPersistentStorage();
-    if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js?v=10').catch(console.warn);
+    if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js?v=11').catch(console.warn);
   } catch (error) {
     console.error(error);
     root.innerHTML = `${header()}<div class="panel"><h1>Не удалось открыть память игры</h1><p>Проверьте, что браузер разрешает хранить данные сайта, и перезагрузите страницу.</p></div>`;
