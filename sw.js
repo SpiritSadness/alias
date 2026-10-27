@@ -1,5 +1,5 @@
-const CACHE = 'svoyi-slova-static-v14';
-const FILES = ['./', './index.html', './styles.css?v=13', './app.js?v=13', './words.js?v=11', './storage.js', './manifest.webmanifest?v=11', './icon.svg', './icon-192.png', './icon-512.png'];
+const CACHE = 'svoyi-slova-static-v15';
+const FILES = ['./', './index.html', './styles.css?v=13', './app.js?v=14', './words.js?v=11', './storage.js', './manifest.webmanifest?v=11', './icon.svg', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(FILES)).then(() => self.skipWaiting()));
