@@ -1,5 +1,7 @@
-import { PACKS, WORDS } from './words.js?v=11';
-import { getSeen, reserveWord, getGame, saveGame, removeGame, exportSeen, importSeen, requestPersistentStorage } from './storage.js';
+import { PACKS, WORDS } from './words.js?v=16';
+import { getSeen, reserveWord, getGame, saveGame, removeGame, exportSeen, importSeen, requestPersistentStorage } from './storage.js?v=16';
+import { renderInstallHint, handleInstallAction, initPwa } from './pwa.js?v=16';
+import { renderPreferences, togglePreference, unlockAudio, playSound } from './preferences.js?v=16';
 
 const root = document.querySelector('#app');
 const toastNode = document.querySelector('#toast');
@@ -42,6 +44,7 @@ function header() {
   return `<header class="topbar">
     <a class="brand" href="#" data-action="home" aria-label="Alias — на главную"><span class="brand-mark">✦</span><span>Alias</span></a>
     <div class="top-actions">
+    <span class="preference-buttons">${renderPreferences()}</span>
     ${view !== 'home' ? '<button class="icon-button" type="button" data-action="home" aria-label="На главную">⌂</button>' : ''}</div>
   </header>`;
 }
@@ -53,6 +56,7 @@ function renderHome() {
       <h1>Сыграем <em>в Alias?</em></h1>
       <div class="hero-actions"><button class="button button-primary button-large" data-action="new-game">Начать игру <span aria-hidden="true">↗</span></button>
       ${resume ? '<button class="button button-secondary button-large" data-action="resume-game">Продолжить партию</button>' : ''}</div>
+      <div id="install-panel">${renderInstallHint()}</div>
     </section>
   </main>`;
 }
@@ -68,24 +72,28 @@ function teamFields() {
   </div>`).join('');
 }
 
-function setupSummary() {
+function setupSummaryDetails() {
   const mode = draft.mode === 'classic' ? 'Классический' : 'Кастом';
   const roundScoring = draft.mode === 'custom' && draft.scoreMode === 'round';
   const timer = draft.mode === 'classic' ? '01:00 на все слова команды' : draft.timerMode === 'round' ? `${formatTime(draft.roundSeconds * 1000)} на все слова команды` : `${formatTime(draft.wordSeconds * 1000)} на каждое слово`;
   const selectedWords = WORDS.filter(word => draft.mode === 'classic' || (draft.category === 'all' || word.category === draft.category) && (draft.difficulty === 'mixed' || word.difficulty === draft.difficulty));
   const pool = selectedWords.filter(word => !seen.has(word.family));
-  return `<aside class="panel setup-summary"><h3 style="margin-bottom:14px">Настройки игры</h3>
-    <div class="summary-rule"><span>Режим</span><strong>${mode}</strong></div>
+  return `<div class="summary-rule"><span>Режим</span><strong>${mode}</strong></div>
     <div class="summary-rule"><span>Команды</span><strong>${draft.teams.length}</strong></div>
     <div class="summary-rule"><span>Таймер</span><strong>${esc(timer)}</strong></div>
     <div class="summary-rule"><span>Победа</span><strong>${roundScoring ? 'больше выигранных раундов' : `до ${draft.targetScore} очков`}</strong></div>
     ${roundScoring ? `<div class="summary-rule"><span>Раундов</span><strong>${draft.roundCount}</strong></div>` : ''}
     <div class="summary-rule"><span>Не показано слов</span><strong>${pool.length}</strong></div>
     <div class="remaining-bar"><i style="width:${selectedWords.length ? pool.length / selectedWords.length * 100 : 0}%"></i></div>
-    <p class="field-note">Слова берутся из встроенного набора. Счётчик показывает, сколько ещё не встречалось в выбранной теме и сложности.</p>
+    <p class="field-note">Счётчик показывает, сколько слов ещё не встречалось в выбранной теме и сложности.</p>`;
+}
+
+function setupSummary() {
+  return `<aside class="panel setup-summary"><h3 style="margin-bottom:14px">Настройки игры</h3><div id="setup-summary-values">${setupSummaryDetails()}</div>
     <div class="setup-footer"><button class="button button-primary button-full button-large" data-action="start-game">Начать партию ↗</button><div id="setup-error"></div></div>
     <details class="history-panel"><summary>История слов</summary><p class="field-note">Сайт запоминает показанные слова в этом браузере, чтобы не выдать их снова в другой партии. Скачайте историю, если хотите перенести её на другой телефон или сохранить перед очисткой браузера. Загрузка добавит использованные слова, но не перенесёт текущую партию.</p><div class="settings-tools"><button class="button button-ghost button-small" data-action="export-history">Скачать историю</button>
       <button class="button button-ghost button-small" data-action="import-history">Загрузить историю</button><input type="file" id="history-file" accept="application/json,.json"></div></details>
+    <details class="history-panel"><summary>О словаре</summary><p class="field-note">${WORDS.length.toLocaleString('ru')} карточек. Уже показанные слова исключаются из всех новых ходов и партий на этом устройстве. Темы и уровни прошли автоматическую разметку и выборочную проверку; неоднозначные слова оставлены в «Разном». <a href="./word-data-notice.txt" target="_blank" rel="noopener">Источник и лицензия</a></p></details>
   </aside>`;
 }
 
@@ -140,7 +148,20 @@ function renderHandoff() {
     <div class="turn-emoji">${special ? '⚡' : '🎤'}</div><h1>${special ? 'Ход перехвата!' : 'Ваша очередь!'}</h1>
     <p>${special ? 'Пять слов без таймера. Угадывать могут все команды.' : 'Передайте телефон объясняющему. Слово появится после старта.'}</p>
     <div class="pair-line">${esc(explainer)} <span class="pair-arrow">→</span> вся команда</div>
-    <button class="button button-primary button-large button-full" data-action="start-turn">Показать слово →</button></div></main>`;
+    <button class="button button-primary button-large button-full" data-action="start-turn">Начать ход →</button></div></main>`;
+}
+
+function renderCountdown() {
+  return `${gameHeader()}<main class="game-frame"><div class="turn-card center countdown-card"><div class="eyebrow">Приготовьтесь</div><p>${esc(roleNames().explainer)} объясняет своей команде</p><div class="countdown-value" id="countdown-value" role="status" aria-live="polite">${game.countdownValue || 'Начали!'}</div></div></main>`;
+}
+
+async function beginCountdown() {
+  game.phase = 'countdown';
+  game.countdownValue = 3;
+  game.countdownEndsAt = Date.now() + 3400;
+  await saveGame(game);
+  render();
+  playSound('tick');
 }
 
 function renderTimer() {
@@ -231,7 +252,7 @@ function renderEmpty() {
 
 function render() {
   root.innerHTML = view === 'home' ? renderHome() : view === 'setup' ? renderSetup() : game ? (
-    game.phase === 'handoff' ? renderHandoff() : game.phase === 'playing' ? renderPlaying() :
+    game.phase === 'handoff' ? renderHandoff() : game.phase === 'countdown' ? renderCountdown() : game.phase === 'playing' ? renderPlaying() :
     game.phase === 'lastWord' ? renderLastWord() : game.phase === 'round' ? renderRound() : game.phase === 'roundResult' ? renderRoundResult() : ['roundTie', 'roundFinished'].includes(game.phase) ? renderRoundFinished() :
     game.phase === 'finished' ? renderFinished() : renderEmpty()
   ) : renderHome();
@@ -299,6 +320,8 @@ async function nextWord() {
 
 async function startTurn() {
   const team = activeTeam();
+  delete game.countdownEndsAt;
+  delete game.countdownValue;
   game.special = game.mode === 'classic' && team.stealNext;
   team.stealNext = false;
   game.slot = (team.score % 8) + 1;
@@ -348,6 +371,7 @@ async function timeout() {
   game.timer.deadline = Date.now();
   game.timer.remainingMs = 0;
   game.phase = 'lastWord';
+  playSound('time');
   await saveGame(game);
   render();
 }
@@ -382,11 +406,16 @@ async function finishTurn() {
   else if (game.activeTeam === game.roundStartTeam && leaders.length === 1 && leaders[0].score >= game.targetScore) game.phase = 'finished';
   else game.phase = 'round';
   game.roles = defaultRoles(activeTeam());
+  playSound(['finished', 'roundFinished', 'roundResult'].includes(game.phase) ? 'win' : 'turn');
   await saveGame(game);
   render();
 }
 
 async function showHome() {
+  if (game?.phase === 'countdown') {
+    game.phase = 'handoff';
+    await saveGame(game);
+  }
   if (game?.phase === 'playing' && game.timer && !game.timer.paused) {
     game.timer.remainingMs = timerLeft();
     game.timer.paused = true;
@@ -397,9 +426,10 @@ async function showHome() {
 }
 
 async function handleAction(action, button) {
+  if (action.startsWith('install-')) return handleInstallAction(action);
   if (action === 'home') return showHome();
   if (action === 'new-game') { view = 'setup'; render(); return; }
-  if (action === 'resume-game') { view = 'game'; render(); return; }
+  if (action === 'resume-game') { view = 'game'; if (game.phase === 'countdown') return beginCountdown(); render(); return; }
   if (action === 'set-mode') { draft.mode = button.dataset.value; render(); return; }
   if (action === 'set-timer-mode') { draft.timerMode = button.dataset.value; render(); return; }
   if (action === 'set-score-mode') { draft.scoreMode = button.dataset.value; render(); return; }
@@ -424,7 +454,7 @@ async function handleAction(action, button) {
     game.roles = defaultRoles(activeTeam());
     view = 'game'; await saveGame(game); render(); return;
   }
-  if (action === 'start-turn') return startTurn();
+  if (action === 'start-turn') return beginCountdown();
   if (action === 'correct' || action === 'skip') return answer(action);
   if (action === 'special-answer') return specialAnswer(Number(button.dataset.index));
   if (action === 'last-word') {
@@ -480,7 +510,25 @@ root.addEventListener('click', event => {
   const button = event.target.closest('[data-action]');
   if (!button) return;
   event.preventDefault();
+  unlockAudio();
+  if (['toggle-theme', 'toggle-sound'].includes(button.dataset.action)) { togglePreference(button.dataset.action); return; }
+  const sound = button.dataset.action === 'correct' ? 'correct' : button.dataset.action === 'skip' ? 'skip' : 'tap';
+  if (!['start-turn', 'end-turn', 'last-word'].includes(button.dataset.action)) playSound(sound);
   run(() => handleAction(button.dataset.action, button));
+});
+
+root.addEventListener('input', event => {
+  const input = event.target;
+  const field = input.dataset.field;
+  if (field === 'team-name') draft.teams[Number(input.dataset.team)].name = input.value;
+  else if (field === 'player') draft.teams[Number(input.dataset.team)].players[Number(input.dataset.player)] = input.value;
+  else {
+    const fields = { 'target-score': 'targetScore', 'round-count': 'roundCount', 'round-seconds': 'roundSeconds', 'word-seconds': 'wordSeconds' };
+    if (!fields[field] || input.value === '' || !Number.isFinite(Number(input.value))) return;
+    draft[fields[field]] = Number(input.value);
+  }
+  const summary = root.querySelector('#setup-summary-values');
+  if (view === 'setup' && summary) summary.innerHTML = setupSummaryDetails();
 });
 
 root.addEventListener('change', event => {
@@ -506,14 +554,35 @@ root.addEventListener('change', event => {
   if (field === 'category') draft.category = input.value;
   if (field === 'difficulty') draft.difficulty = input.value;
   if (field === 'skip-penalty') draft.skipPenalty = Number(input.value);
-  if (view === 'setup') render();
+  const numericFields = { 'target-score': 'targetScore', 'round-count': 'roundCount', 'round-seconds': 'roundSeconds', 'word-seconds': 'wordSeconds' };
+  if (numericFields[field]) input.value = draft[numericFields[field]];
+  if (view === 'setup' && ['category', 'difficulty', 'skip-penalty'].includes(field)) {
+    const summary = root.querySelector('#setup-summary-values');
+    if (summary) summary.innerHTML = setupSummaryDetails();
+  }
 });
 
 setInterval(() => {
+  if (view === 'game' && game?.phase === 'countdown') {
+    if (document.hidden) return;
+    const value = Math.max(0, Math.ceil((game.countdownEndsAt - Date.now() - 400) / 1000));
+    if (value !== game.countdownValue) {
+      game.countdownValue = value;
+      const node = root.querySelector('#countdown-value');
+      if (node) { node.textContent = value || 'Начали!'; node.classList.remove('countdown-pop'); void node.offsetWidth; node.classList.add('countdown-pop'); }
+      playSound(value ? 'tick' : 'go');
+    }
+    if (Date.now() >= game.countdownEndsAt) run(startTurn);
+    return;
+  }
   if (view !== 'game' || game?.phase !== 'playing' || !game.timer || game.timer.paused) return;
   updateTimer();
   if (timerLeft() <= 0) run(timeout);
 }, 120);
+
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && game?.phase === 'countdown') { game.countdownEndsAt = Date.now() + 3400; game.countdownValue = 3; if (view === 'game') render(); }
+});
 
 async function init() {
   try {
@@ -538,7 +607,10 @@ async function init() {
     }
     render();
     requestPersistentStorage();
-    if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js?v=15').catch(console.warn);
+    initPwa(() => {
+      const panel = root.querySelector('#install-panel');
+      if (view === 'home' && panel && !document.querySelector('#install-dialog')?.open) panel.innerHTML = renderInstallHint();
+    });
   } catch (error) {
     console.error(error);
     root.innerHTML = `${header()}<div class="panel"><h1>Не удалось открыть память игры</h1><p>Проверьте, что браузер разрешает хранить данные сайта, и перезагрузите страницу.</p></div>`;

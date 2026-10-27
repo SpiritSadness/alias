@@ -1,3 +1,5 @@
+import { canonicalFamily } from './words.js?v=16';
+
 const DB_NAME = 'svoyi-slova-v1';
 let opening;
 
@@ -31,7 +33,7 @@ function transactionResult(db, storeName, mode, work) {
 export async function getSeen() {
   const db = await openDb();
   return new Set(await transactionResult(db, 'seen', 'readonly', (store, set) => {
-    store.getAllKeys().onsuccess = event => set(event.target.result);
+    store.getAllKeys().onsuccess = event => set(event.target.result.map(canonicalFamily));
   }));
 }
 
@@ -39,7 +41,7 @@ export async function reserveWord(pool) {
   const db = await openDb();
   return transactionResult(db, 'seen', 'readwrite', (store, set) => {
     store.getAllKeys().onsuccess = event => {
-      const seen = new Set(event.target.result);
+      const seen = new Set(event.target.result.map(canonicalFamily));
       const available = pool.filter(word => !seen.has(word.family));
       if (!available.length) {
         set({ word: null, remaining: 0 });
@@ -83,7 +85,7 @@ export async function importSeen(records) {
   const db = await openDb();
   await transactionResult(db, 'seen', 'readwrite', store => {
     for (const record of records) store.put({
-      family: record.family,
+      family: canonicalFamily(record.family),
       firstSeenAt: typeof record.firstSeenAt === 'string' ? record.firstSeenAt : new Date().toISOString()
     });
   });

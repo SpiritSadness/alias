@@ -1,11 +1,13 @@
 {
   "name": "Alias",
   "short_name": "Alias",
+  "id": "./",
   "description": "Игра в слова для друзей",
   "lang": "ru",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
+  "categories": ["games", "entertainment"],
   "background_color": "#101629",
   "theme_color": "#101629",
   "icons": [
