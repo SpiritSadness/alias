@@ -476,13 +476,14 @@ async function init() {
     seen = await getSeen();
     game = await getGame();
     if (game?.teams.some(team => team.explainerStart == null)) {
-      game.teams.forEach(team => { if (team.explainerStart == null) team.explainerStart = randomExplainer(team); });
+      // Старые партии уже шли по порядку от первого участника: сохраняем этот круг без повторов.
+      game.teams.forEach(team => { if (team.explainerStart == null) team.explainerStart = 0; });
       if (game.phase === 'handoff' || game.phase === 'round' || game.phase === 'roundResult') game.roles = defaultRoles(activeTeam());
       await saveGame(game);
     }
     render();
     requestPersistentStorage();
-    if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js?v=6').catch(console.warn);
+    if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js?v=7').catch(console.warn);
   } catch (error) {
     console.error(error);
     root.innerHTML = `${header()}<div class="panel"><h1>Не удалось открыть память игры</h1><p>Проверьте, что браузер разрешает хранить данные сайта, и перезагрузите страницу.</p></div>`;
