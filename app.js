@@ -201,16 +201,19 @@ function renderRoundFinished() {
   const best = Math.max(...wins);
   const winnerIndex = wins.indexOf(best);
   const tied = wins.filter(value => value === best).length > 1;
-  const canContinue = game.phase === 'roundTie';
+  const needsDecision = game.phase === 'roundTie';
+  const canContinue = needsDecision && poolForTurn().filter(word => !seen.has(word.family)).length >= game.teams.length;
   const played = history.length;
+  const extraRounds = Math.max(0, played - game.roundCount);
   const roundNoun = played % 10 === 1 && played % 100 !== 11 ? 'раунд' : [2, 3, 4].includes(played % 10) && ![12, 13, 14].includes(played % 100) ? 'раунда' : 'раундов';
-  return `${gameHeader()}<main class="game-frame"><div class="turn-card center"><div class="finish-trophy">★</div><div class="eyebrow">${canContinue ? 'Ничья по раундам' : `Партия завершена · ${played} ${roundNoun}`}</div>
+  return `${gameHeader()}<main class="game-frame"><div class="turn-card center"><div class="finish-trophy">★</div><div class="eyebrow">${needsDecision ? 'Ничья по раундам' : `Партия завершена · ${played} ${roundNoun}`}</div>
     <h1>${tied ? 'Ничья!' : `Победитель — ${esc(game.teams[winnerIndex].name)}`}</h1>
-    <p>Итог по выигранным раундам</p>
+    <p>Победы в раундах${extraRounds ? ' · дополнительные учтены' : ''}</p>
     <div class="round-standings">${game.teams.map((team, index) => `<div><span>${esc(team.name)}</span><strong>${wins[index]}</strong></div>`).join('')}</div>
-    <p class="fine-print">${canContinue ? 'В дополнительном раунде каждая команда сыграет по одному ходу. Если снова будет ничья, можно повторить или закончить вничью.' : 'Ничьи в раундах не дают победу ни одной команде.'}</p>
+    ${extraRounds ? `<p class="fine-print">Основных раундов: ${game.roundCount} · дополнительных: ${extraRounds}</p>` : ''}
+    <p class="fine-print">${needsDecision ? canContinue ? 'В дополнительном раунде каждая команда сыграет по одному ходу. Если снова будет ничья, можно повторить или закончить вничью.' : 'Для полного дополнительного раунда не хватает новых слов. Партию можно закончить вничью.' : 'Ничьи в раундах не дают победу ни одной команде.'}</p>
     <details class="round-history"><summary>Результаты раундов</summary>${history.map((round, index) => `<div><span>${roundName(index + 1)}</span><span>${round.scores.map((score, teamIndex) => `${esc(game.teams[teamIndex].name)} ${score}`).join(' · ')}</span></div>`).join('')}</details>
-    <div class="game-actions">${canContinue ? '<button class="button button-primary button-large" data-action="new-round">Дополнительный раунд ↗</button><button class="button button-secondary button-large" data-action="finish-draw">Закончить вничью</button>' : '<button class="button button-primary button-large" data-action="new-game">Новая партия ↗</button><button class="button button-secondary button-large" data-action="home">На главную</button>'}</div></div></main>`;
+    <div class="game-actions">${needsDecision ? `${canContinue ? '<button class="button button-primary button-large" data-action="new-round">Дополнительный раунд ↗</button>' : ''}<button class="button button-secondary button-large" data-action="finish-draw">Закончить вничью</button>` : '<button class="button button-primary button-large" data-action="new-game">Новая партия ↗</button><button class="button button-secondary button-large" data-action="home">На главную</button>'}</div></div></main>`;
 }
 
 function renderFinished() {
@@ -432,6 +435,7 @@ async function handleAction(action, button) {
   if (action === 'end-turn') return finishTurn();
   if (action === 'next-turn') { game.phase = 'handoff'; await saveGame(game); render(); return; }
   if (action === 'new-round' && ['roundResult', 'roundTie'].includes(game.phase)) {
+    if (game.phase === 'roundTie' && poolForTurn().filter(word => !seen.has(word.family)).length < game.teams.length) return;
     game.roundNumber = (game.roundNumber || 1) + 1;
     game.teams.forEach(team => { team.score = 0; });
     game.roundStartTeam = (game.roundStartTeam + 1) % game.teams.length;
@@ -534,7 +538,7 @@ async function init() {
     }
     render();
     requestPersistentStorage();
-    if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js?v=14').catch(console.warn);
+    if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js?v=15').catch(console.warn);
   } catch (error) {
     console.error(error);
     root.innerHTML = `${header()}<div class="panel"><h1>Не удалось открыть память игры</h1><p>Проверьте, что браузер разрешает хранить данные сайта, и перезагрузите страницу.</p></div>`;
