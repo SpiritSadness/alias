@@ -38,7 +38,7 @@ const showToast = message => {
 
 function header() {
   return `<header class="topbar">
-    <a class="brand" href="#" data-action="home" aria-label="Свои слова — на главную"><span class="brand-mark">✦</span><span>свои слова</span></a>
+    <a class="brand" href="#" data-action="home" aria-label="Alias — на главную"><span class="brand-mark">✦</span><span>Alias</span></a>
     <div class="top-actions">
     ${view !== 'home' ? '<button class="icon-button" type="button" data-action="home" aria-label="На главную">⌂</button>' : ''}</div>
   </header>`;
@@ -48,7 +48,7 @@ function renderHome() {
   const resume = game && game.phase !== 'finished';
   return `${header()}<main class="home-hero">
     <section class="home-copy"><div class="eyebrow">Игра для друзей</div>
-      <h1>Сыграем <em>в слова?</em></h1>
+      <h1>Сыграем <em>в Alias?</em></h1>
       <div class="hero-actions"><button class="button button-primary button-large" data-action="new-game">Начать игру <span aria-hidden="true">↗</span></button>
       ${resume ? '<button class="button button-secondary button-large" data-action="resume-game">Продолжить партию</button>' : ''}</div>
     </section>
@@ -404,7 +404,7 @@ async function handleAction(action, button) {
     const records = await exportSeen();
     const blob = new Blob([JSON.stringify({ format: 'svoyi-slova-history-v1', records }, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
-    const link = document.createElement('a'); link.href = url; link.download = `svoyi-slova-history-${new Date().toISOString().slice(0, 10)}.json`;
+    const link = document.createElement('a'); link.href = url; link.download = `alias-history-${new Date().toISOString().slice(0, 10)}.json`;
     document.body.append(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
     showToast('История слов сохранена'); return;
   }

@@ -1,4 +1,4 @@
-const CACHE = 'svoyi-slova-static-v3';
+const CACHE = 'svoyi-slova-static-v4';
 const FILES = ['./', './index.html', './styles.css', './app.js', './words.js', './storage.js', './manifest.webmanifest', './icon.svg', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', event => {

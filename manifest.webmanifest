@@ -1,6 +1,6 @@
 {
-  "name": "Свои слова",
-  "short_name": "Свои слова",
+  "name": "Alias",
+  "short_name": "Alias",
   "description": "Игра в слова для друзей",
   "lang": "ru",
   "start_url": "./",
