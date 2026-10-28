@@ -66,6 +66,18 @@ export async function saveGame(game) {
   await transactionResult(db, 'meta', 'readwrite', store => store.put(game, 'game'));
 }
 
+export async function getSession() {
+  const db = await openDb();
+  return transactionResult(db, 'meta', 'readonly', (store, set) => {
+    store.get('ui-session').onsuccess = event => set(event.target.result || null);
+  });
+}
+
+export async function saveSession(session) {
+  const db = await openDb();
+  await transactionResult(db, 'meta', 'readwrite', store => store.put(session, 'ui-session'));
+}
+
 export async function removeGame() {
   const db = await openDb();
   await transactionResult(db, 'meta', 'readwrite', store => store.delete('game'));

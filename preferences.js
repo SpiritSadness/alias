@@ -49,7 +49,9 @@ export function playSound(kind = 'tap') {
 }
 export function togglePreference(action) {
   if (action === 'toggle-theme') {
+    document.documentElement.classList.add('theme-changing');
     theme = theme === 'dark' ? 'light' : 'dark';
+    requestAnimationFrame(() => requestAnimationFrame(() => document.documentElement.classList.remove('theme-changing')));
     document.documentElement.dataset.theme = theme;
     document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme === 'dark' ? '#101629' : '#f4f6ee');
     try { localStorage.setItem('alias-theme', theme); } catch { /* Optional preference. */ }

@@ -20,3 +20,13 @@ https://creativecommons.org/licenses/by-sa/4.0/
 
 WordNet (Princeton University) использован для проверки английских значений.
 https://wordnet.princeton.edu/license-and-commercial-use
+
+Короткие русские толкования: Русский Викисловарь, авторы соответствующих
+словарных статей; выгрузка Kaikki.org / Wiktextract от 24 октября 2026.
+https://ru.wiktionary.org/
+https://kaikki.org/ruwiktionary/rawdata.html
+https://creativecommons.org/licenses/by-sa/4.0/
+Адаптация: выбор до двух значений, удаление служебных помет, сокращение
+длинных определений; отдельные определения добавлены редакционно.
+Производный набор толкований: definitions.js (CC BY-SA 4.0).
+Ссылка на исходную статью и её историю доступна из окна значения слова.

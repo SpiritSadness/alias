@@ -1,6 +1,32 @@
+export const TEAM_COLORS = [
+  ['Лайм','#d9ff69'],['Коралл','#ff816b'],['Небо','#80b7ff'],['Лаванда','#b9a0ff'],
+  ['Персик','#ffc77b'],['Мята','#7be2d0'],['Роза','#ff9dca'],['Солнце','#ffe16b'],
+  ['Бирюза','#62cbd2'],['Ирис','#9bafff'],['Фисташка','#a9d98b'],['Малина','#ed7f9d'],
+  ['Абрикос','#efa66d'],['Сирень','#d4a9e8'],['Лёд','#a8d8ec'],['Шалфей','#95c7ac']
+];
+export function teamColor(team, index = 0) {
+  return TEAM_COLORS.some(([, value]) => value === team?.color) ? team.color : TEAM_COLORS[index % TEAM_COLORS.length][1];
+}
+export function selectedCategories(settings) {
+  return Array.isArray(settings.categories) ? [...new Set(settings.categories.filter(value => typeof value === 'string' && value !== 'all'))] : settings.category && settings.category !== 'all' ? [settings.category] : [];
+}
 export function matchesWordSettings(word, settings) {
-  return (!settings.category || settings.category === 'all' || word.category === settings.category)
+  const categories = selectedCategories(settings);
+  return (!categories.length || categories.includes(word.category))
     && (settings.mode === 'classic' || !settings.difficulty || settings.difficulty === 'mixed' || word.difficulty === settings.difficulty);
+}
+
+export function tieContenders(game) {
+  const values = game.mode === 'custom' && game.scoreMode === 'round'
+    ? game.teams.map((_, index) => (game.roundHistory || []).filter(round => round.winnerIndex === index).length)
+    : game.teams.map(team => team.score);
+  const best = Math.max(...values);
+  return values.flatMap((value, index) => value === best ? [index] : []);
+}
+
+export function targetOutcome(game) {
+  const best = Math.max(...game.teams.map(team => team.score));
+  return best < game.targetScore ? 'round' : tieContenders(game).length === 1 ? 'finished' : 'gameTie';
 }
 
 export function buildTurnSummary(game, teamIndex = game.activeTeam) {
