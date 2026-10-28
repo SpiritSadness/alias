@@ -48,6 +48,6 @@ export function buildTurnSummary(game, teamIndex = game.activeTeam) {
     skipped: game.special ? Math.max(0, (game.specialPlayed || 0) - specialCorrect) : game.turnStats?.skipped || 0,
     net: game.special ? allocations.reduce((sum, item) => sum + item.delta, 0) : allocations[teamIndex].delta,
     special: Boolean(game.special), allocations, words: turnWords(game),
-    lastWord: lastWord ? { word: lastWord.word, teamIndex: lastWord.teamIndex, teamName: game.teams[lastWord.teamIndex]?.name || null } : null
+    lastWord: lastWord ? { word: lastWord.word, teamIndex: lastWord.teamIndex, teamName: game.teams[lastWord.teamIndex]?.name || null, ...(lastAction?.previousScores?.length > 1 ? {recipients:lastAction.previousScores.map(item => game.teams[item.teamIndex].name)} : {}) } : null
   };
 }

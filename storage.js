@@ -116,12 +116,13 @@ export async function getDefinitionReports() {
     store.get('definition-reports').onsuccess = event => set(event.target.result || {});
   });
 }
-export async function reportDefinition(word) {
+export async function reportDefinition(word, enabled = true) {
   const db = await openDb();
   await transactionResult(db, 'meta', 'readwrite', store => {
     store.get('definition-reports').onsuccess = event => {
       const reports = event.target.result || {};
-      reports[word.family] = { text:word.text, reportedAt:new Date().toISOString() };
+      if (enabled) reports[word.family] = { text:word.text, reportedAt:new Date().toISOString() };
+      else delete reports[word.family];
       store.put(reports, 'definition-reports');
     };
   });
