@@ -1,5 +1,5 @@
-const CACHE = 'alias-static-v17';
-const FILES = ['./', './index.html', './styles.css?v=16', './app.js?v=16', './words.js?v=16', './word-bank.js?v=16', './storage.js?v=16', './pwa.js?v=16', './preferences.js?v=16', './manifest.webmanifest?v=16', './icon.svg', './icon-192.png', './icon-512.png', './word-data-notice.txt'];
+const CACHE = 'alias-static-v18';
+const FILES = ['./', './index.html', './styles.css?v=17', './app.js?v=17', './game-rules.js?v=17', './words.js?v=16', './word-bank.js?v=16', './storage.js?v=16', './pwa.js?v=17', './preferences.js?v=16', './manifest.webmanifest?v=16', './icon.svg', './icon-192.png', './icon-512.png', './word-data-notice.txt'];
 
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(FILES)).then(() => self.skipWaiting()));
