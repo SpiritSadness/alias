@@ -1,4 +1,4 @@
-import { turnWords } from './review.js?v=19';
+import { turnWords } from './review.js?v=23';
 export const TEAM_COLORS = [
   ['Лайм','#d9ff69'],['Коралл','#ff816b'],['Небо','#80b7ff'],['Лаванда','#b9a0ff'],
   ['Персик','#ffc77b'],['Мята','#7be2d0'],['Роза','#ff9dca'],['Солнце','#ffe16b'],

@@ -1,15 +1,15 @@
-import { PACKS, WORDS } from './words.js?v=22';
-import { getSeen, reserveWord, getGame, saveGame as storeGame, getSession, saveSession, getDefinitionReports, reportDefinition, exportSeen, importSeen, requestPersistentStorage } from './storage.js?v=22';
-import { renderInstallHint, handleInstallAction, initPwa } from './pwa.js?v=22';
+import { PACKS, WORDS } from './words.js?v=23';
+import { getSeen, saveGameAndReserveWord, getGameRecord, saveGame as storeGame, getSession, saveSession, getDefinitionReports, reportDefinition, exportSeen, importSeen, requestPersistentStorage } from './storage.js?v=23';
+import { renderInstallHint, handleInstallAction, initPwa } from './pwa.js?v=23';
 import { renderPreferences, togglePreference, unlockAudio, playSound } from './preferences.js?v=19';
-import { matchesWordSettings, buildTurnSummary, TEAM_COLORS, teamColor, selectedCategories, tieContenders, targetOutcome, additionalTurnChanges } from './game-rules.js?v=22';
-import { pauseGame, readCheckpoint, writeCheckpoint, restoreGame } from './session.js?v=18';
+import { matchesWordSettings, buildTurnSummary, TEAM_COLORS, teamColor, selectedCategories, tieContenders, targetOutcome, additionalTurnChanges } from './game-rules.js?v=23';
+import { pauseGame, readCheckpoint, writeCheckpoint, restoreGame, gameIdentity, normaliseSettings } from './session.js?v=23';
 import { createNavigation } from './navigation.js?v=18';
-import { DEFINITIONS } from './definitions.js?v=22';
+import { DEFINITIONS } from './definitions.js?v=23';
 
-import { canReview, reviewWords, turnWords } from './review.js?v=19';
+import { canReview, reviewWords, turnWords } from './review.js?v=23';
 
-import { PLAY_STYLES, playStyle, playStyleName, entrants, makePairSchedule, turnRoles, advanceTurn, nextCycle, lastGuessers, applyScore, undoScore } from './play-modes.js?v=22';
+import { PLAY_STYLES, playStyle, playStyleName, entrants, makePairSchedule, turnRoles, advanceTurn, nextCycle, lastGuessers, applyScore, undoScore } from './play-modes.js?v=23';
 
 const root = document.querySelector('#app');
 const toastNode = document.querySelector('#toast');
@@ -20,6 +20,7 @@ let seen = new Set();
 let game = null;
 let view = 'home';
 let busy = false;
+let committedGame = null, observedRevision = 0, staleWindow = false, pauseRequested = false;
 let toastTimer;
 let ready = false;
 let navigation;
@@ -40,37 +41,41 @@ let draft = {
 };
 
 function persistCheckpoint() {
-  if (!ready) return;
-  writeCheckpoint({ view, draft, game });
+  if (!ready || staleWindow) return;
+  writeCheckpoint({ view, draft, game: busy ? committedGame : game });
   lastCheckpointAt = Date.now();
 }
 function persistUi() {
-  if (!ready) return;
+  if (!ready || staleWindow) return;
   persistCheckpoint();
   clearTimeout(uiSaveTimer);
-  uiSaveTimer = setTimeout(() => saveSession({ view, draft: structuredClone(draft), savedAt: Date.now() }).catch(console.warn), 200);
+  uiSaveTimer = setTimeout(() => saveSession({ view, draft: structuredClone(draft), gameRev:observedRevision, savedAt: Date.now() }).catch(console.warn), 200);
 }
-async function saveGame(value) {
-  value.updatedAt = Date.now();
-  persistCheckpoint();
-  await storeGame(value);
+function acceptGame(saved) {
+  game = saved; observedRevision = saved._rev;
+  committedGame = structuredClone(saved); persistCheckpoint();
+}
+async function saveGame(value, options) {
+  acceptGame(await storeGame(value, options));
 }
 function closeOverlay() {
   const dialog = root.querySelector('dialog[open]');
   if (!dialog) return false;
-  dialog.close();
-  return true;
+  dialog.close(); return true;
 }
-function pauseAndPersist() {
-  if (!ready) return;
-  pauseGame(game);
-  persistCheckpoint();
-  if (game) { game.updatedAt = Date.now(); storeGame(game).catch(console.warn); }
-  saveSession({ view, draft: structuredClone(draft), savedAt: Date.now() }).catch(console.warn);
+async function pauseAndPersist() {
+  if (!ready || staleWindow) return;
+  if (busy) { pauseRequested = true; persistCheckpoint(); return; }
+  pauseGame(game); persistCheckpoint();
+  if (!game) return;
+  const snapshot=structuredClone(game);busy=true;
+  try { const saved=await storeGame(snapshot); if(game?._rev===snapshot._rev) acceptGame(saved); }
+  catch(error) { if(error.code==='STALE_GAME') {staleWindow=true;render();} else console.warn(error); }
+  finally {busy=false;pauseRequested=false;persistCheckpoint();}
 }
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]);
-const clamp = (value, low, high) => Math.min(high, Math.max(low, Number(value) || low));
+const clamp = (value, low, high) => Math.min(high, Math.max(low, Math.round(Number(value)) || low));
 const activeTeam = () => game.teams[game.activeTeam];
 const roundWins = () => game.teams.map((_, index) => (game.roundHistory || []).filter(round => round.winnerIndex === index).length);
 const roundName = (number = game.roundNumber || 1) => game.roundCount && number > game.roundCount ? `Доп. раунд ${number - game.roundCount}` : `Раунд ${number}`;
@@ -96,7 +101,7 @@ function header() {
 }
 
 function renderHome() {
-  const resume = game && !['finished', 'roundFinished', 'drawFinished'].includes(game.phase);
+  const resume = game && !['finished', 'roundFinished', 'drawFinished', 'stopped'].includes(game.phase);
   return `${header()}<main class="home-hero">
     <section class="home-copy"><div class="eyebrow">Игра для друзей</div>
       <h1>Сыграем <em>в Alias?</em></h1>
@@ -155,7 +160,7 @@ function setupSummaryDetails() {
     <div class="summary-rule"><span>Темы</span><strong>${esc(categoryLabel())}</strong></div>
     <div class="summary-rule"><span>Таймер</span><strong>${esc(timer)}</strong></div>
     <div class="summary-rule"><span>Победа</span><strong>${roundScoring ? 'больше выигранных раундов' : `до ${draft.targetScore} очков`}</strong></div>
-    <div class="summary-rule"><span>При ничьей</span><strong>${draft.mode === 'classic' || draft.tieMode === 'sudden' ? 'решающее слово' : 'полный раунд'}</strong></div>
+    <div class="summary-rule"><span>При ничьей</span><strong>${draft.mode === 'classic' || draft.tieMode === 'sudden' ? playStyle(draft)==='pairs'?'решающее слово; при общей ничьей — полный круг':playStyle(draft)==='versus'&&entrants(draft).every(team=>team.players.length===1)?'полный круг':'решающее слово' : 'полный раунд'}</strong></div>
     ${roundScoring ? `<div class="summary-rule"><span>Раундов</span><strong>${draft.roundCount}</strong></div>` : ''}
     <div class="summary-rule"><span>Не показано слов</span><strong>${pool.length}</strong></div>
     <div class="remaining-bar"><i style="width:${selectedWords.length ? pool.length / selectedWords.length * 100 : 0}%"></i></div>
@@ -172,7 +177,7 @@ function setupSummary() {
 }
 
 function renderSetup() {
-  return `${header()}<main><div class="section-head"><div><div class="eyebrow">Настройка партии</div><h1>${playStyle(draft) === 'pairs' ? 'Соберите друзей.' : 'Соберите команду.'}</h1><p>Несколько решений — и можно играть.</p></div>${game && !['finished','roundFinished','drawFinished'].includes(game.phase) ? '<button class="button button-secondary" data-action="resume-game">Вернуться к партии →</button>' : ''}</div>
+  return `${header()}<main><div class="section-head"><div><div class="eyebrow">Настройка партии</div><h1>${playStyle(draft) === 'pairs' ? 'Соберите друзей.' : 'Соберите команду.'}</h1><p>Несколько решений — и можно играть.</p></div>${game && !['finished','roundFinished','drawFinished','stopped'].includes(game.phase) ? '<button class="button button-secondary" data-action="resume-game">Вернуться к партии →</button>' : ''}</div>
     <div class="setup-grid"><div class="stack">
       <section class="panel"><div class="panel-head"><h3>Как играем</h3></div><div class="play-style-grid">${PLAY_STYLES.map(style => `<button class="mode-card ${playStyle(draft) === style.id ? 'active' : ''}" data-action="set-play-style" data-value="${style.id}" aria-pressed="${playStyle(draft) === style.id}"><strong>${style.name}</strong><small>${style.description}</small></button>`).join('')}</div></section>
       <section class="panel"><div class="panel-head"><h3><span class="step">1</span> Правила</h3></div>
@@ -320,7 +325,7 @@ function renderRoundResult() {
   const winners = game.teams.filter(team => team.score === best);
   const wins = roundWins();
   return `${gameHeader()}<main class="game-frame"><div class="turn-card center"><div class="finish-trophy">★</div><div class="eyebrow">Раунд ${game.roundNumber || 1} завершён</div>
-    <h1>${winners.length === 1 ? `${esc(winners[0].name)} выиграла раунд!` : 'Ничья в раунде!'}</h1>
+    <h1>${winners.length === 1 ? `Победитель раунда — ${esc(winners[0].name)}` : 'Ничья в раунде!'}</h1>
     <p>${game.teams.map(team => `${esc(team.name)} — ${team.score} ${team.score % 10 === 1 && team.score % 100 !== 11 ? 'очко' : [2, 3, 4].includes(team.score % 10) && ![12, 13, 14].includes(team.score % 100) ? 'очка' : 'очков'}`).join(' · ')}</p>
     ${game.roundCount ? `<p class="fine-print">Выиграно раундов: ${game.teams.map((team, index) => `${esc(team.name)} — ${wins[index]}`).join(' · ')}. В следующем раунде очки за слова начнутся с нуля.</p>` : '<p class="fine-print">В следующем раунде очки начнутся с нуля.</p>'}
     ${renderLastWordAward(game.lastSummary)}${renderLastWordsHistory(true)}${renderWordReview('round')}
@@ -334,8 +339,8 @@ function renderRoundFinished() {
   const winnerIndex = game.tiebreak?.winnerIndex ?? wins.indexOf(best);
   const tied = !game.tiebreak && wins.filter(value => value === best).length > 1;
   const needsDecision = game.phase === 'roundTie';
-  const sudden = game.tieMode === 'sudden';
-  const canContinue = needsDecision && poolForTurn().filter(word => !seen.has(word.family)).length >= (sudden ? 1 : game.teams.length);
+  const sudden = game.tieMode === 'sudden' && !needsFullCircle();
+  const canContinue = needsDecision && poolForTurn().filter(word => !seen.has(word.family)).length >= (sudden ? 1 : cycleSize());
   const played = history.length;
   const extraRounds = Math.max(0, played - game.roundCount);
   const roundNoun = played % 10 === 1 && played % 100 !== 11 ? 'раунд' : [2, 3, 4].includes(played % 10) && ![12, 13, 14].includes(played % 100) ? 'раунда' : 'раундов';
@@ -351,21 +356,21 @@ function renderRoundFinished() {
 }
 
 function renderTiebreakResult() {
-  return game.tiebreak ? `<div class="last-word-award"><span>Решающее слово «${esc(game.tiebreak.word)}»</span><strong>${esc(game.teams[game.tiebreak.winnerIndex].name)} ответила первой</strong><small>Решающий ответ учтён отдельно и не добавляет полный раунд.</small></div>` : '';
+  return game.tiebreak ? `<div class="last-word-award"><span>Решающее слово «${esc(game.tiebreak.word)}»</span><strong>Первый правильный ответ — ${esc(game.teams[game.tiebreak.winnerIndex].name)}</strong><small>Решающий ответ учтён отдельно и не добавляет полный раунд.</small></div>` : '';
 }
 
 function renderGameTie() {
-  const sudden = game.mode === 'classic' || game.tieMode === 'sudden';
+  const sudden = (game.mode === 'classic' || game.tieMode === 'sudden') && !needsFullCircle();
   return `${gameHeader()}<main class="game-frame"><section class="turn-card center"><div class="eyebrow">Равный счёт на финише</div><h1>Ничья!</h1><p>${playStyle(game) === 'pairs' ? 'Все пары завершили полный круг.' : 'Все команды сыграли одинаковое число ходов.'} ${sudden ? 'Победителя определит одно слово: кто ответит первым.' : playStyle(game) === 'pairs' ? 'Ещё один полный круг всех пар.' : 'Каждая команда получит ещё по одному ходу.'}</p>${renderWordReview()}<div class="game-actions"><button class="button button-primary" data-action="${sudden ? 'start-tiebreak' : 'extra-target'}">${sudden ? 'Решающее слово' : 'Ещё полный круг'} →</button><button class="button button-secondary" data-action="finish-draw">Закончить вничью</button></div></section></main>`;
 }
 
 function renderSuddenHandoff() {
   const contenders = game.suddenContenders || tieContenders(game);
-  return `${gameHeader()}<main class="game-frame"><section class="turn-card center"><div class="eyebrow">Финал</div><h1>Решающее слово</h1><p>Передайте телефон ведущему, который не участвует в отгадывании. Он объясняет слово всем финалистам одновременно.</p><div class="finalists">${contenders.map(index => `<span style="--team-color:${teamColor(game.teams[index],index)}">${esc(game.teams[index].name)}</span>`).join('')}</div><p class="fine-print">Первый правильный ответ приносит победу. Экран со словом видит только ведущий.</p><button class="button button-primary button-full" data-action="start-sudden">Начать отсчёт →</button></section></main>`;
+  return `${gameHeader()}<main class="game-frame"><section class="turn-card center"><div class="eyebrow">Финал</div><h1>Решающее слово</h1><p>${game.suddenHost != null ? `Ведущий — ${esc(game.teams[game.suddenHost].name)}.` : 'Передайте телефон одному участнику, который не отгадывает.'} Он объясняет слово всем финалистам одновременно.</p><div class="finalists">${contenders.map(index => `<span style="--team-color:${teamColor(game.teams[index],index)}">${esc(game.teams[index].name)}</span>`).join('')}</div><p class="fine-print">Первый правильный ответ приносит победу. Экран со словом видит только ведущий.</p><button class="button button-primary button-full" data-action="start-sudden">Начать отсчёт →</button></section></main>`;
 }
 
 function renderSuddenWord() {
-  return `${gameHeader()}<main class="game-frame"><section class="turn-card center"><div class="eyebrow">Решающее слово</div><div class="word-card"><span class="word-hint">Ведущий объясняет всем финалистам</span><strong>${esc(game.word.text)}</strong></div><p class="field-note" style="margin-top:18px">Кто ответил первым?</p><div class="winner-grid">${game.suddenContenders.map(index => `<button class="button button-secondary" data-action="sudden-answer" data-index="${index}">${esc(game.teams[index].name)} угадала</button>`).join('')}</div><button class="button button-ghost" data-action="skip-sudden">Другое слово</button></section></main>`;
+  return `${gameHeader()}<main class="game-frame"><section class="turn-card center"><div class="eyebrow">Решающее слово</div><div class="word-card"><span class="word-hint">Ведущий объясняет всем финалистам</span><strong>${esc(game.word.text)}</strong></div><p class="field-note" style="margin-top:18px">Кто ответил первым?</p><div class="winner-grid">${game.suddenContenders.map(index => `<button class="button button-secondary" data-action="sudden-answer" data-index="${index}">Ответ: ${esc(game.teams[index].name)}</button>`).join('')}</div><button class="button button-ghost" data-action="skip-sudden">Другое слово</button></section></main>`;
 }
 
 function renderTieEmpty() {
@@ -385,18 +390,39 @@ function renderFinished() {
 }
 
 function renderEmpty() {
-  return `${gameHeader()}<main class="game-frame"><div class="turn-card center"><div class="turn-emoji">📚</div><h1>Новые слова закончились</h1>
-    <p>В выбранном наборе больше нет непоказанных слов. Повторять старые карточки мы не будем. Попробуйте другую тему или сложность в новой партии.</p>
-    <div class="game-actions"><button class="button button-primary" data-action="end-turn">Завершить ход</button><button class="button button-secondary" data-action="new-game">Новая настройка</button></div></div></main>`;
+  const stopped=game.phase==='stopped';
+  return `${gameHeader()}<main class="game-frame"><div class="turn-card center"><div class="turn-emoji">📚</div><h1>${stopped?'Партия остановлена':'Новые слова закончились'}</h1>
+    <p>${stopped?'Победитель не определён: круг не был завершён. Набранные очки и разбор слов сохранены.':'В выбранном наборе нет свежих слов. Незавершённый круг не даёт победу. Можно продолжить с оставшимся временем, выбрав все обычные темы и смешанную сложность, или остановиться без победителя.'}</p>
+    ${renderWordReview()}<div class="game-actions">${stopped ? '<button class="button button-primary" data-action="new-game">Новая партия</button>' : `${WORDS.some(word=>!seen.has(word.family)&&matchesWordSettings(word,{categories:[],category:'all',difficulty:'mixed',mode:'custom'})) ? '<button class="button button-primary" data-action="expand-pool">Все обычные темы · продолжить</button>' : ''}<button class="button button-secondary" data-action="stop-depleted">Завершить без победителя</button>`}</div></div></main>`;
+}
+function renderStale() {
+  return `${header()}<main class="game-frame"><section class="turn-card center"><h1>Партия изменилась в другом окне</h1><p>Откройте актуальное сохранение, чтобы продолжить.</p><button class="button button-primary" data-action="sync-game">Открыть актуальную партию</button></section></main>`;
+}
+function needsFullCircle() {
+  return playStyle(game)==='pairs' && tieContenders(game).length===game.teams.length || playStyle(game)==='versus' && game.teams.every(team=>team.players.length===1);
+}
+function cycleSize() { return playStyle(game)==='pairs' ? game.teams.length*(game.teams.length-1) : game.teams.length; }
+async function stopDepleted() {
+  if(!['empty','depleted'].includes(game?.phase)) return;
+  game.lastSummary=buildTurnSummary(game);game.turnHistory ||= [];game.turnHistory.push(game.lastSummary);
+  game.phase='stopped';game.word=null;game.timer=null;game.incompleteRound=true;
+  await saveGame(game);render();
 }
 
 function render() {
-  const page = view === 'home' ? renderHome() : view === 'setup' ? renderSetup() : game ? (
+  const focused=document.activeElement;
+  const focusData=focused?.dataset?.action && root.contains?.(focused) ? {...focused.dataset} : null;
+  const page = staleWindow ? renderStale() : view === 'home' ? renderHome() : view === 'setup' ? renderSetup() : game ? (
     game.phase === 'handoff' ? renderHandoff() : game.phase === 'countdown' ? renderCountdown() : game.phase === 'playing' ? renderPlaying() :
     game.phase === 'lastWord' ? renderLastWord() : game.phase === 'round' ? renderRound() : game.phase === 'roundResult' ? renderRoundResult() : ['roundTie', 'roundFinished'].includes(game.phase) ? renderRoundFinished() :
     game.phase === 'gameTie' ? renderGameTie() : game.phase === 'suddenHandoff' ? renderSuddenHandoff() : game.phase === 'suddenWord' ? renderSuddenWord() : game.phase === 'tieEmpty' ? renderTieEmpty() : game.phase === 'drawFinished' ? renderDrawFinished() : game.phase === 'finished' ? renderFinished() : renderEmpty()
   ) : renderHome();
   root.innerHTML = page + '<dialog class="sheet-dialog definition-dialog" id="definition-dialog" aria-labelledby="definition-title"><div class="sheet-heading"><h2 id="definition-title" tabindex="-1" autofocus></h2><button class="icon-button" data-action="close-dialog" aria-label="Закрыть значение слова">×</button></div><div id="definition-body"></div><button class="button button-primary button-full" data-action="close-dialog">Понятно</button></dialog>';
+  if(focusData) {
+    const controls=[...root.querySelectorAll('[data-action]')];
+    const replacement=controls.find(node=>!node.disabled && Object.entries(focusData).every(([key,value])=>node.dataset[key]===value));
+    (replacement || controls.find(node=>!node.disabled && ['resume-timer','next-turn','last-word','stop-depleted'].includes(node.dataset.action)))?.focus({preventScroll:true});
+  }
   updateTimer();
   navigation?.sync(view);
   persistUi();
@@ -416,9 +442,16 @@ function updateTimer() {
 
 async function run(work) {
   if (busy) return;
+  const before=structuredClone(game), beforeView=view, revision=observedRevision;
   busy = true;
-  try { await work(); } catch (error) { console.error(error); showToast(error.message || 'Что-то пошло не так'); }
-  finally { busy = false; }
+  try { await work(); }
+  catch (error) {
+    console.error(error);
+    if(error.code==='STALE_GAME') staleWindow=true;
+    else if(observedRevision===revision) { game=before;view=beforeView;pauseGame(game);committedGame=structuredClone(game); }
+    render();showToast(error.message || 'Что-то пошло не так');
+  }
+  finally { busy=false;persistCheckpoint();if(pauseRequested||document.hidden){pauseRequested=false;await pauseAndPersist();} }
 }
 
 function validateDraft() {
@@ -429,9 +462,9 @@ function validateDraft() {
   if (roster.some(team => !team.name.trim()) || names.some(name => !name)) return 'Заполните имена участников и названия команд.';
   if (new Set(names).size !== names.length) return 'Имена участников должны различаться.';
   if (!individual && new Set(roster.map(team => team.name.trim().toLocaleLowerCase('ru'))).size !== roster.length) return 'Названия команд должны различаться.';
-  if ((draft.mode === 'classic' || draft.scoreMode === 'target') && (draft.targetScore < 5 || draft.targetScore > 200)) return 'Цель по очкам должна быть от 5 до 200.';
+  if ((draft.mode === 'classic' || draft.scoreMode === 'target') && (!Number.isInteger(draft.targetScore) || draft.targetScore < 5 || draft.targetScore > 200)) return 'Цель по очкам должна быть от 5 до 200.';
   if (draft.mode === 'custom' && draft.scoreMode === 'round' && (!Number.isInteger(draft.roundCount) || draft.roundCount < 2 || draft.roundCount > 20)) return 'Число раундов должно быть от 2 до 20.';
-  if (draft.mode === 'custom' && (draft.timerMode === 'round' ? draft.roundSeconds : draft.wordSeconds) < 10) return 'Минимальное время — 10 секунд.';
+  if (draft.mode === 'custom') { const seconds=draft.timerMode==='round'?draft.roundSeconds:draft.wordSeconds; if(!Number.isInteger(seconds)||seconds<10||seconds>600) return 'Время должно быть целым числом от 10 до 600 секунд.'; }
   const pool = WORDS.filter(word => !seen.has(word.family) && matchesWordSettings(word, draft));
   if (!pool.length) return 'В этом наборе больше нет новых слов. Выберите другую тему или сложность.';
   return null;
@@ -449,41 +482,30 @@ function poolForTurn() {
   return WORDS.filter(word => matchesWordSettings(word, game));
 }
 
-async function nextWord() {
-  game.word = null;
-  game.pendingWord = true;
-  persistCheckpoint();
-  const { word } = await reserveWord(poolForTurn());
-  game.word = word;
-  game.pendingWord = false;
-  if (!word) { game.phase = 'empty'; game.timer = null; }
-  else if (game.mode === 'custom' && game.timerMode === 'word') {
-    game.timer.remainingMs = game.timer.durationMs;
-    game.timer.deadline = Date.now() + game.timer.durationMs;
+function attachWord(candidate, word, sudden=false) {
+  candidate.word=word;candidate.pendingWord=false;
+  if(sudden) {candidate.timer=null;candidate.phase=word?'suddenWord':'tieEmpty';}
+  else if(!word) {candidate.depletedTimer=candidate.timer?{...candidate.timer,remainingMs:timerLeft(),deadline:null,paused:true}:null;candidate.phase='depleted';candidate.timer=null;}
+  else {
+    candidate.phase='playing';
+    if(candidate.mode==='custom'&&candidate.timerMode==='word'&&candidate.timer) {
+      candidate.timer.remainingMs=candidate.timer.durationMs;
+      candidate.timer.deadline=candidate.timer.paused?null:Date.now()+candidate.timer.durationMs;
+    }
   }
-  if (word) { seen.add(word.family); game.turnWords ||= []; game.turnWords.push({text:word.text,family:word.family,status:'unanswered'}); }
-  await saveGame(game);
+  if(word) {const key=sudden?'decidingWords':'turnWords';candidate[key] ||= [];if(!candidate[key].some(entry=>entry.family===word.family))candidate[key].push({text:word.text,family:word.family,status:'unanswered'});}
+}
+async function nextWord() {
+  acceptGame(await saveGameAndReserveWord(game,poolForTurn(),(candidate,word)=>attachWord(candidate,word)));
+  if(game.word) seen.add(game.word.family);
   render();
 }
-
 async function reserveSuddenWord() {
   game.decidingWords ||= [];
-  const previous = game.decidingWords.at(-1);
-  if (previous && previous.status !== 'guessed') previous.status = 'skipped';
-  delete game.countdownNext;
-  delete game.countdownEndsAt;
-  delete game.countdownValue;
-  game.timer = null;
-  game.word = null;
-  game.pendingWord = true;
-  persistCheckpoint();
-  const { word } = await reserveWord(poolForTurn());
-  game.word = word;
-  game.pendingWord = false;
-  game.phase = word ? 'suddenWord' : 'tieEmpty';
-  if (word) { seen.add(word.family); game.decidingWords.push({text:word.text,family:word.family,status:'unanswered'}); }
-  await saveGame(game);
-  render();
+  const previous=game.decidingWords.at(-1);if(previous&&previous.status!=='guessed')previous.status='skipped';
+  delete game.countdownNext;delete game.countdownEndsAt;delete game.countdownValue;
+  acceptGame(await saveGameAndReserveWord(game,poolForTurn(),(candidate,word)=>attachWord(candidate,word,true)));
+  if(game.word)seen.add(game.word.family);render();
 }
 
 async function startTurn() {
@@ -525,7 +547,7 @@ function recordScore(teamIndex, delta, type, label) {
 }
 
 async function answer(type) {
-  if (game.phase !== 'playing' || game.timer?.paused || game.special) return;
+  if (game.phase !== 'playing' || !game.word || game.timer?.paused || game.special) return;
   if (timerLeft() <= 0) { await timeout(); return; }
   const delta = type === 'correct' ? 1 : game.mode === 'classic' ? -1 : -game.skipPenalty;
   recordScore(game.activeTeam, delta, type, type === 'correct' ? 'Угадали +1' : `Пропуск ${delta || '0'}`);
@@ -551,7 +573,8 @@ async function timeout() {
 }
 
 async function finishTurn() {
-  if (!game || !['playing', 'lastWord', 'empty'].includes(game.phase)) return;
+  if(['empty','depleted'].includes(game?.phase)) return stopDepleted();
+  if (!game || !['playing', 'lastWord'].includes(game.phase)) return;
   const team = activeTeam();
   if (playStyle(game) === 'teams' && game.mode === 'classic' && !game.special) {
     if (stealSpaces(game.targetScore).some(space => team.score >= space && game.turnStartScore < space)) team.stealNext = true;
@@ -588,6 +611,17 @@ async function showHome() {
 }
 
 async function handleAction(action, button) {
+  if(action==='sync-game') {
+    const record=await getGameRecord();game=restoreGame(record.game);observedRevision=record.revision;staleWindow=false;
+    committedGame=structuredClone(game);if(game)await saveGame(game);view=game?'game':'home';render();return;
+  }
+  if(staleWindow) return;
+  if(action==='stop-depleted') return stopDepleted();
+  if(action==='expand-pool' && ['empty','depleted'].includes(game?.phase)) {
+    game.categories=[];game.category='all';game.difficulty='mixed';game.timer=game.depletedTimer;
+    if(game.timer&&game.timer.remainingMs<=0)game.timer.remainingMs=1;
+    return nextWord();
+  }
   if (action.startsWith('install-')) return handleInstallAction(action);
   if (action === 'back') return navigation?.back();
   if (action === 'close-dialog') { closeOverlay(); return; }
@@ -649,10 +683,10 @@ async function handleAction(action, button) {
   if (action === 'start-game') {
     const error = validateDraft();
     if (error) { root.querySelector('#setup-error').innerHTML = `<div class="error-box">${esc(error)}</div>`; return; }
-    if (game && !['finished','roundFinished','drawFinished'].includes(game.phase) && !startingConfirmed) { root.querySelector('#new-game-dialog').showModal(); return; }
+    if (game && !['finished','roundFinished','drawFinished','stopped'].includes(game.phase) && !startingConfirmed) { root.querySelector('#new-game-dialog').showModal(); return; }
     startingConfirmed = false;
     game = {
-      ...structuredClone(draft),
+      ...structuredClone(draft), gameId:crypto.randomUUID(),_rev:observedRevision,
       categories: selectedCategories(draft), tieMode: draft.mode === 'classic' ? 'sudden' : draft.tieMode,
       teams: entrants(draft).map((team,index) => ({ ...structuredClone(team), color: teamColor(team,index), score: 0, turns: 0, stealNext: false, explainerStart: randomExplainer(team) })),
       activeTeam: Math.floor(Math.random() * entrants(draft).length), phase: 'handoff', roles: null, roundNumber: 1, roundHistory: [],
@@ -662,11 +696,14 @@ async function handleAction(action, button) {
     if (playStyle(game) === 'pairs') { game.pairSchedule = makePairSchedule(game.teams.length); game.pairIndex = 0; game.activeTeam = game.pairSchedule[0][1]; }
     game.roundStartTeam = game.activeTeam;
     game.roles = defaultRoles(activeTeam());
-    view = 'game'; await saveGame(game); render(); return;
+    view = 'game'; await saveGame(game,{replace:true}); render(); return;
   }
   if (action === 'start-turn' && game.phase === 'handoff') return beginCountdown();
   if (action === 'start-tiebreak' && ['roundTie','gameTie'].includes(game.phase)) {
-    game.suddenContenders = tieContenders(game); game.phase = 'suddenHandoff'; await saveGame(game); render(); return;
+    if(needsFullCircle())return handleAction(game.phase==='roundTie'?'new-round':'extra-target',button);
+    game.suddenContenders = tieContenders(game);
+    if(playStyle(game)==='pairs') game.suddenHost=game.teams.findIndex((_,index)=>!game.suddenContenders.includes(index));
+    game.phase = 'suddenHandoff'; await saveGame(game); render(); return;
   }
   if (action === 'start-sudden' && game.phase === 'suddenHandoff') return beginCountdown('sudden');
   if (action === 'skip-sudden' && game.phase === 'suddenWord') return reserveSuddenWord();
@@ -692,13 +729,13 @@ async function handleAction(action, button) {
     const index = Number(button.dataset.index);
     if (!Number.isInteger(index) || (index !== -1 && !lastGuessers(game).includes(index))) return;
     game.lastWordResult = { word: game.word?.text || '', teamIndex: index >= 0 ? index : null };
-    if (index >= 0) recordScore(index, 1, 'last', `${game.teams[index].name} перехватила +1`);
+    if (index >= 0) recordScore(index, 1, 'last', `Последнее слово: ${game.teams[index].name} +1`);
     return finishTurn();
   }
   if (action === 'end-turn') return finishTurn();
   if (action === 'next-turn') { game.phase = 'handoff'; await saveGame(game); render(); return; }
   if (action === 'new-round' && ['roundResult', 'roundTie'].includes(game.phase)) {
-    if (game.phase === 'roundTie' && poolForTurn().filter(word => !seen.has(word.family)).length < game.teams.length) return;
+    if (game.phase === 'roundTie' && poolForTurn().filter(word => !seen.has(word.family)).length < cycleSize()) return;
     game.roundNumber = (game.roundNumber || 1) + 1;
     game.teams.forEach(team => { team.score = 0; });
     nextCycle(game); game.roles = defaultRoles(activeTeam()); game.phase = 'handoff';
@@ -799,7 +836,7 @@ root.addEventListener('change', event => {
   if (field === 'skip-penalty') draft.skipPenalty = Number(input.value);
   const numericFields = { 'target-score': 'targetScore', 'round-count': 'roundCount', 'round-seconds': 'roundSeconds', 'word-seconds': 'wordSeconds' };
   if (numericFields[field]) input.value = draft[numericFields[field]];
-  if (view === 'setup' && ['category', 'difficulty', 'skip-penalty'].includes(field)) {
+  if (view === 'setup' && ['category', 'difficulty', 'skip-penalty', ...Object.keys(numericFields)].includes(field)) {
     const summary = root.querySelector('#setup-summary-values');
     if (summary) summary.innerHTML = setupSummaryDetails();
   }
@@ -831,7 +868,8 @@ window.addEventListener('pageshow', event => { if (event.persisted && ready) ren
 
 async function init() {
   try {
-    const [savedSeen, savedGame, savedUi, savedReports] = await Promise.all([getSeen(), getGame(), getSession(), getDefinitionReports()]);
+    const [savedSeen, record, savedUi, savedReports] = await Promise.all([getSeen(), getGameRecord(), getSession(), getDefinitionReports()]);
+    const savedGame=record.game;observedRevision=record.revision;
     definitionReports = savedReports;
     seen = savedSeen;
     const backup = readCheckpoint();
@@ -843,17 +881,18 @@ async function init() {
       draft.categories = selectedCategories(ui.draft).filter(id => PACKS.some(pack => pack.id === id));
       draft.tieMode = draft.tieMode === 'sudden' ? 'sudden' : 'round';
     }
-    game = backup && backup.savedAt >= (savedGame?.updatedAt || 0) ? backup.game : savedGame;
-    view = ['home','setup','game'].includes(ui?.view) ? ui.view : game && !['finished','roundFinished','drawFinished'].includes(game.phase) ? 'game' : 'home';
+    draft=normaliseSettings(draft);
+    game = backup?.game && (backup.game._rev||0)===record.revision && (!savedGame || gameIdentity(backup.game)===gameIdentity(savedGame)) && backup.savedAt >= (savedGame?.updatedAt || 0) ? backup.game : savedGame;
+    committedGame=structuredClone(game);
+    view = ['home','setup','game'].includes(ui?.view) ? ui.view : game && !['finished','roundFinished','drawFinished','stopped'].includes(game.phase) ? 'game' : 'home';
     if (view === 'game' && !game) view = 'home';
     restoreGame(game);
     if (game && ['playing','lastWord'].includes(game.phase) && !game.turnWords) game.turnWords = turnWords(game);
     if (game) game.tieMode ||= game.mode === 'classic' ? 'sudden' : 'round';
     if (game && ['playing','suddenWord'].includes(game.phase) && (!game.word || game.pendingWord)) {
-      const { word } = await reserveWord(poolForTurn());
-      game.word = word; game.pendingWord = false;
-      if (word) seen.add(word.family); else game.phase = game.phase === 'suddenWord' ? 'tieEmpty' : 'empty';
-      await saveGame(game);
+      const sudden=game.phase==='suddenWord';
+      acceptGame(await saveGameAndReserveWord(game,poolForTurn(),(candidate,word)=>attachWord(candidate,word,sudden)));
+      if(game.word)seen.add(game.word.family);
     }
     if (game?.lastSummary && !game.lastSummary.allocations && ['round', 'roundResult', 'roundTie', 'roundFinished', 'finished'].includes(game.phase)) {
       const teamIndex = Math.max(0, game.teams.findIndex(team => team.name === game.lastSummary.teamName));
@@ -883,9 +922,12 @@ async function init() {
       if (game.phase === 'handoff' || game.phase === 'round' || game.phase === 'roundResult') game.roles = defaultRoles(activeTeam());
       await saveGame(game);
     }
+    if(game?.phase==='empty'){game.phase='depleted';await saveGame(game);}
+    if(game && ['suddenHandoff','suddenWord'].includes(game.phase)&&needsFullCircle()){game.phase=game.mode==='custom'&&game.scoreMode==='round'?'roundTie':'gameTie';game.word=null;await saveGame(game);}
+    if(game)await saveGame(game);
     ready = true;
     navigation = createNavigation(view, next => {
-      if (view === 'game' && next !== 'game') { pauseGame(game); if (game) storeGame(game).catch(console.warn); }
+      if (view === 'game' && next !== 'game') { pauseAndPersist(); }
       view = next === 'game' && !game ? 'setup' : next;
       render();
     }, closeOverlay, () => showToast('Вы на главном экране'));
@@ -896,6 +938,7 @@ async function init() {
       if (view === 'home' && panel && !document.querySelector('#install-dialog')?.open) panel.innerHTML = renderInstallHint();
     });
   } catch (error) {
+    if(error.code==='STALE_GAME'){ready=true;staleWindow=true;render();return;}
     console.error(error);
     root.innerHTML = `${header()}<div class="panel"><h1>Не удалось открыть память игры</h1><p>Проверьте, что браузер разрешает хранить данные сайта, и перезагрузите страницу.</p></div>`;
   }

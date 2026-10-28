@@ -1,4 +1,4 @@
-import { BANK } from './word-bank.js?v=22';
+import { BANK } from './word-bank.js?v=23';
 
 export const PACKS = BANK.packs;
 const packsById = new Map(PACKS.map(pack => [pack.id, pack]));

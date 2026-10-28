@@ -1,4 +1,4 @@
-const RESULTS = new Set(['round','roundResult','roundTie','roundFinished','gameTie','finished','drawFinished','tieEmpty']);
+const RESULTS = new Set(['round','roundResult','roundTie','roundFinished','gameTie','finished','drawFinished','tieEmpty','depleted','stopped']);
 export const canReview = game => Boolean(game && RESULTS.has(game.phase));
 export function turnWords(game) {
   if (game.turnWords) return structuredClone(game.turnWords);
@@ -13,6 +13,7 @@ export function reviewWords(game, scope = 'all') {
   const turns = game.turnHistory?.length ? game.turnHistory : game.lastSummary ? [game.lastSummary] : [];
   const selected = scope === 'turn' ? [game.lastSummary].filter(Boolean) : scope === 'round' ? turns.filter(turn => turn.roundNumber === game.roundNumber) : turns;
   const words = selected.flatMap(turn => turn.words || (turn.lastWord ? [{text:turn.lastWord.word,status:turn.lastWord.teamIndex == null ? 'unanswered' : 'guessed'}] : []));
+  if (['depleted','empty'].includes(game.phase)) words.push(...turnWords(game));
   if (scope === 'all') words.push(...(game.decidingWords || (game.tiebreak ? [{text:game.tiebreak.word,status:'guessed'}] : [])));
   const unique = new Map();
   for (const word of words) if (word?.text) unique.set(word.family || word.text, {...word});
