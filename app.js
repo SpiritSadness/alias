@@ -1,15 +1,15 @@
-import { PACKS, WORDS } from './words.js?v=16';
-import { getSeen, reserveWord, getGame, saveGame as storeGame, getSession, saveSession, getDefinitionReports, reportDefinition, exportSeen, importSeen, requestPersistentStorage } from './storage.js?v=20';
-import { renderInstallHint, handleInstallAction, initPwa } from './pwa.js?v=21';
+import { PACKS, WORDS } from './words.js?v=22';
+import { getSeen, reserveWord, getGame, saveGame as storeGame, getSession, saveSession, getDefinitionReports, reportDefinition, exportSeen, importSeen, requestPersistentStorage } from './storage.js?v=22';
+import { renderInstallHint, handleInstallAction, initPwa } from './pwa.js?v=22';
 import { renderPreferences, togglePreference, unlockAudio, playSound } from './preferences.js?v=19';
-import { matchesWordSettings, buildTurnSummary, TEAM_COLORS, teamColor, selectedCategories, tieContenders, targetOutcome, additionalTurnChanges } from './game-rules.js?v=21';
+import { matchesWordSettings, buildTurnSummary, TEAM_COLORS, teamColor, selectedCategories, tieContenders, targetOutcome, additionalTurnChanges } from './game-rules.js?v=22';
 import { pauseGame, readCheckpoint, writeCheckpoint, restoreGame } from './session.js?v=18';
 import { createNavigation } from './navigation.js?v=18';
-import { DEFINITIONS } from './definitions.js?v=18';
+import { DEFINITIONS } from './definitions.js?v=22';
 
 import { canReview, reviewWords, turnWords } from './review.js?v=19';
 
-import { PLAY_STYLES, playStyle, playStyleName, entrants, makePairSchedule, turnRoles, advanceTurn, nextCycle, lastGuessers, applyScore, undoScore } from './play-modes.js?v=20';
+import { PLAY_STYLES, playStyle, playStyleName, entrants, makePairSchedule, turnRoles, advanceTurn, nextCycle, lastGuessers, applyScore, undoScore } from './play-modes.js?v=22';
 
 const root = document.querySelector('#app');
 const toastNode = document.querySelector('#toast');
@@ -121,13 +121,13 @@ function teamFields() {
 
 function categoryLabel() {
   const selected = selectedCategories(draft);
-  if (!selected.length) return 'Все темы';
+  if (!selected.length) return 'Все темы · без 18+';
   if (selected.length > 2) return `Выбрано тем: ${selected.length}`;
   return selected.map(id => PACKS.find(pack => pack.id === id)?.name || id).join(', ');
 }
 function setupDialogs() {
   const selected = selectedCategories(draft);
-  return `<dialog class="sheet-dialog" id="categories-dialog" aria-labelledby="categories-title"><div class="sheet-heading"><h2 id="categories-title">Темы для игры</h2><button class="icon-button" data-action="close-dialog" aria-label="Закрыть выбор тем">×</button></div><p class="field-note">Выберите одну или несколько тем.</p><button class="category-all ${!selected.length ? 'selected' : ''}" data-action="categories-all" aria-pressed="${!selected.length}">Все темы</button><div class="category-options">${PACKS.map(pack => `<label><input type="checkbox" data-field="category-multi" value="${pack.id}" ${selected.includes(pack.id) ? 'checked' : ''}><span class="category-emoji">${pack.emoji}</span><span>${esc(pack.name)}</span></label>`).join('')}</div><div class="sheet-footer"><span id="category-selection">${esc(categoryLabel())}</span><button class="button button-primary" data-action="close-dialog">Готово</button></div></dialog>
+  return `<dialog class="sheet-dialog" id="categories-dialog" aria-labelledby="categories-title"><div class="sheet-heading"><h2 id="categories-title">Темы для игры</h2><button class="icon-button" data-action="close-dialog" aria-label="Закрыть выбор тем">×</button></div><p class="field-note">Выберите одну или несколько тем. Категория 18+ включается только отдельно.</p><button class="category-all ${!selected.length ? 'selected' : ''}" data-action="categories-all" aria-pressed="${!selected.length}">Все темы · без 18+</button><div class="category-options">${PACKS.map(pack => `<label class="${pack.optIn ? 'adult-category' : ''}"><input type="checkbox" data-field="category-multi" value="${pack.id}" ${selected.includes(pack.id) ? 'checked' : ''}><span class="category-emoji">${pack.emoji}</span><span>${esc(pack.name)}${pack.optIn ? '<small>Секс, свидания, отношения и неловкие ситуации</small>' : ''}</span></label>`).join('')}</div><div class="sheet-footer"><span id="category-selection">${esc(categoryLabel())}</span><button class="button button-primary" data-action="close-dialog">Готово</button></div></dialog>
   <dialog class="sheet-dialog" id="colors-dialog" aria-labelledby="colors-title"><div class="sheet-heading"><h2 id="colors-title">Цвет команды</h2><button class="icon-button" data-action="close-dialog" aria-label="Закрыть выбор цвета">×</button></div><div id="color-options" class="color-options"></div></dialog>
   <dialog class="sheet-dialog" id="new-game-dialog" aria-labelledby="new-game-title"><h2 id="new-game-title">Начать новую партию?</h2><p>Текущая партия ещё не завершена. История слов сохранится.</p><div class="dialog-actions"><button class="button button-primary" data-action="resume-game">Продолжить текущую</button><button class="button button-secondary" data-action="confirm-start">Начать новую</button><button class="button button-ghost" data-action="close-dialog">Остаться в настройках</button></div></dialog>`;
 }
@@ -182,7 +182,7 @@ function renderSetup() {
       <section class="panel"><div class="panel-head"><h3><span class="step">2</span> Участники</h3><span class="mini-pill">${playStyle(draft) === 'pairs' ? 'от 3 игроков' : playStyle(draft) === 'versus' ? 'от 1 на команду' : 'от 2 на команду'}</span></div>
         <div class="team-grid">${teamFields()}</div>${playStyle(draft) === 'pairs' ? `<button class="link-button" data-action="add-participant" ${draft.participants.length >= 12 ? 'disabled' : ''}>+ Добавить участника</button>` : playStyle(draft) === 'teams' ? `<button class="link-button" data-action="add-team" ${draft.teams.length >= 6 ? 'disabled' : ''}>+ Добавить команду</button>` : ''}
       </section>
-      <section class="panel"><div class="panel-head"><h3><span class="step">3</span> Параметры игры</h3></div><p class="field-note">${playStyle(draft) === 'pairs' ? 'Один полный круг — все пары в обе стороны. За слово оба получают +1; штраф за пропуск, если включён, тоже получают оба. Финиш проверяется после полного круга.' : playStyle(draft) === 'versus' ? 'Все участники одной команды объясняют другой. Очки и штрафы получает только угадывающая команда. Раунд — два хода со сменой сторон.' : ''}${playStyle(draft) !== 'teams' && draft.mode === 'classic' ? ' Классический набор: минута на ход, пропуск −1. Ходы перехвата используются только в режиме «В своей команде».' : ''}</p>
+      <section class="panel"><div class="panel-head"><h3><span class="step">3</span> Параметры игры</h3></div><p class="field-note">${playStyle(draft) === 'pairs' ? 'Один полный круг — все пары в обе стороны. Очки за слова и штрафы за пропуск получает только угадывающий. Финиш проверяется после полного круга.' : playStyle(draft) === 'versus' ? 'Все участники одной команды объясняют другой. Очки и штрафы получает только угадывающая команда. Раунд — два хода со сменой сторон.' : ''}${playStyle(draft) !== 'teams' && draft.mode === 'classic' ? ' Классический набор: минута на ход, пропуск −1. Ходы перехвата используются только в режиме «В своей команде».' : ''}</p>
         ${draft.mode === 'custom' ? `<div class="field" style="margin-bottom:16px"><span>Таймер</span><div class="segmented">
           <button class="${draft.timerMode === 'round' ? 'active' : ''}" data-action="set-timer-mode" data-value="round">На все слова хода</button>
           <button class="${draft.timerMode === 'word' ? 'active' : ''}" data-action="set-timer-mode" data-value="word">На каждое слово</button></div></div>
@@ -615,7 +615,7 @@ async function handleAction(action, button) {
     reviewedWord = word;
     root.querySelector('#definition-title').textContent = word.text;
     const meanings = DEFINITIONS[word.family] || [];
-    root.querySelector('#definition-body').innerHTML = (meanings.length ? meanings.map(text => `<p>${esc(text)}</p>`).join('') : '<p>Короткое толкование пока не добавлено.</p>') + `<p class="definition-source"><a href="https://ru.wiktionary.org/wiki/${encodeURIComponent(word.text)}" target="_blank" rel="noopener">Викисловарь · источник</a></p><button class="definition-report" data-action="report-definition" aria-pressed="${Boolean(definitionReports[word.family])}">${definitionReports[word.family] ? 'Отмечено · отменить' : 'Непонятное значение'}</button><p class="field-note">Отметки хранятся на этом устройстве.</p>`;
+    root.querySelector('#definition-body').innerHTML = (meanings.length ? meanings.map(text => `<p>${esc(text)}</p>`).join('') : '<p>Короткое толкование пока не добавлено.</p>') + `<p class="definition-source"><a href="https://ru.wiktionary.org/wiki/${encodeURIComponent(word.text)}" target="_blank" rel="noopener">Словарная статья в Викисловаре</a></p><button class="definition-report" data-action="report-definition" aria-pressed="${Boolean(definitionReports[word.family])}">${definitionReports[word.family] ? 'Отмечено · отменить' : 'Непонятное значение'}</button><p class="field-note">Отметки хранятся на этом устройстве.</p>`;
     root.querySelector('#definition-dialog').showModal();
     root.querySelector('#definition-title').focus({preventScroll:true});
     return;

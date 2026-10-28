@@ -13,7 +13,7 @@ export function selectedCategories(settings) {
 }
 export function matchesWordSettings(word, settings) {
   const categories = selectedCategories(settings);
-  return (!categories.length || categories.includes(word.category))
+  return (categories.length ? categories.includes(word.category) : word.category !== 'adult')
     && (settings.mode === 'classic' || !settings.difficulty || settings.difficulty === 'mixed' || word.difficulty === settings.difficulty);
 }
 

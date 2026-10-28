@@ -1,4 +1,4 @@
-import { canonicalFamily } from './words.js?v=16';
+import { canonicalFamily } from './words.js?v=22';
 
 const DB_NAME = 'svoyi-slova-v1';
 let opening;

@@ -1,6 +1,6 @@
 export const PLAY_STYLES = [
   {id:'teams',name:'В своей команде',description:'Один объясняет, его команда угадывает.'},
-  {id:'pairs',name:'Каждый с каждым',description:'Личный счёт. Каждый объясняет каждому, за слово оба получают +1.'},
+  {id:'pairs',name:'Каждый с каждым',description:'Личный счёт. Каждый объясняет каждому, очко получает только угадавший.'},
   {id:'versus',name:'Объясняем соперникам',description:'Две команды от одного человека. Очки получает угадывающая сторона.'}
 ];
 export const playStyle = settings => ['pairs','versus'].includes(settings?.playStyle) ? settings.playStyle : 'teams';
@@ -36,7 +36,6 @@ export function lastGuessers(game) {
 }
 export function applyScore(game,index,delta,type) {
   const recipients=[index];
-  if(playStyle(game)==='pairs' && ['correct','skip','last'].includes(type)) recipients.push(turnRoles(game).explainerIndex);
   const unique=[...new Set(recipients)],previousScores=unique.map(teamIndex=>({teamIndex,score:game.teams[teamIndex].score}));
   for(const teamIndex of unique) game.teams[teamIndex].score=Math.max(0,game.teams[teamIndex].score+delta);
   return {teamIndex:index,previousScore:previousScores[0].score,previousScores,delta:game.teams[index].score-previousScores[0].score,type,word:game.word?.text || ''};
