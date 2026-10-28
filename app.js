@@ -1,8 +1,8 @@
 import { PACKS, WORDS } from './words.js?v=16';
 import { getSeen, reserveWord, getGame, saveGame as storeGame, getSession, saveSession, getDefinitionReports, reportDefinition, exportSeen, importSeen, requestPersistentStorage } from './storage.js?v=20';
-import { renderInstallHint, handleInstallAction, initPwa } from './pwa.js?v=20';
+import { renderInstallHint, handleInstallAction, initPwa } from './pwa.js?v=21';
 import { renderPreferences, togglePreference, unlockAudio, playSound } from './preferences.js?v=19';
-import { matchesWordSettings, buildTurnSummary, TEAM_COLORS, teamColor, selectedCategories, tieContenders, targetOutcome } from './game-rules.js?v=20';
+import { matchesWordSettings, buildTurnSummary, TEAM_COLORS, teamColor, selectedCategories, tieContenders, targetOutcome, additionalTurnChanges } from './game-rules.js?v=21';
 import { pauseGame, readCheckpoint, writeCheckpoint, restoreGame } from './session.js?v=18';
 import { createNavigation } from './navigation.js?v=18';
 import { DEFINITIONS } from './definitions.js?v=18';
@@ -194,7 +194,7 @@ function renderSetup() {
         <div class="field-grid">${draft.mode === 'classic' || draft.scoreMode === 'target' ? `<label class="field"><span>Игра до очков</span><input type="number" min="5" max="200" data-field="target-score" value="${draft.targetScore}"></label>` : ''}
         ${draft.mode === 'custom' && draft.scoreMode === 'round' ? `<label class="field"><span>Раундов в партии</span><input type="number" min="2" max="20" data-field="round-count" value="${draft.roundCount}"></label>` : ''}
         ${draft.mode === 'custom' ? `<label class="field"><span>${draft.timerMode === 'round' ? 'Секунд на все слова хода' : 'Секунд на каждое слово'}</span><input type="number" min="10" max="600" data-field="${draft.timerMode === 'round' ? 'round-seconds' : 'word-seconds'}" value="${draft.timerMode === 'round' ? draft.roundSeconds : draft.wordSeconds}"></label>` : ''}
-        <div class="field"><span>Темы</span><button class="category-select" data-action="open-categories"><span id="category-button-label">${esc(categoryLabel())}</span><span aria-hidden="true">＋</span></button></div>
+        <div class="field"><span>Темы</span><button class="category-select" data-action="open-categories" aria-haspopup="dialog" aria-controls="categories-dialog"><span id="category-button-label">${esc(categoryLabel())}</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg></button></div>
         ${draft.mode === 'custom' ? `<label class="field"><span>Сложность</span><select data-field="difficulty"><option value="mixed" ${draft.difficulty === 'mixed' ? 'selected' : ''}>Смешанная</option><option value="easy" ${draft.difficulty === 'easy' ? 'selected' : ''}>Лёгкая</option><option value="medium" ${draft.difficulty === 'medium' ? 'selected' : ''}>Средняя</option><option value="hard" ${draft.difficulty === 'hard' ? 'selected' : ''}>Сложная</option></select></label>
         <label class="field"><span>Штраф за пропуск</span><select data-field="skip-penalty"><option value="0" ${draft.skipPenalty === 0 ? 'selected' : ''}>Без штрафа</option><option value="1" ${draft.skipPenalty === 1 ? 'selected' : ''}>−1 очко</option></select></label>` : ''}</div>
       </section>
@@ -297,6 +297,12 @@ function renderLastWordsHistory(currentRound = false) {
   return `<details class="round-history"><summary>Последние слова · ${turns.length}</summary>${turns.map(turn => `<div><span>${esc(turn.teamName)}: «${esc(turn.lastWord.word)}»</span><span>${turn.lastWord.teamName ? `+1 → ${esc(turn.lastWord.teamName)}` : 'Не угадали'}</span></div>`).join('')}</details>`;
 }
 
+function renderAdditionalTurnChanges(summary) {
+  const changes = additionalTurnChanges(summary);
+  if (!changes.length) return '';
+  return `<div class="turn-allocations" aria-label="Другие изменения счёта"><span>Другие изменения счёта</span>${changes.map(item => `<div><span>${esc(item.teamName)}${item.excludingLastWord ? '<br><small class="field-note">За остальные слова</small>' : ''}</span><strong>${item.delta > 0 ? '+' : ''}${item.delta}</strong></div>`).join('')}</div>`;
+}
+
 function renderRound() {
   const previous = game.lastSummary;
   const summary = previous.allocations ? previous : buildTurnSummary({ ...game, special: previous.special }, Math.max(0, game.teams.findIndex(team => team.name === previous.teamName)));
@@ -304,7 +310,7 @@ function renderRound() {
     <p>${summary.special ? 'Результат хода перехвата для всех команд.' : playStyle(game) === 'pairs' ? 'Личный результат за этот ход.' : 'Результат угадывающей команды за этот ход.'}</p>
     <div class="turn-results"><div class="turn-result"><strong>${summary.correct}</strong><small>${summary.special ? 'угадано всего' : 'угадано'}</small></div><div class="turn-result"><strong>${summary.skipped}</strong><small>пропущено</small></div><div class="turn-result"><strong>${summary.net >= 0 ? '+' : ''}${summary.net}</strong><small>${summary.special ? 'очков всем командам' : 'очков за ход'}</small></div></div>
     ${renderLastWordAward(summary)}${renderWordReview('turn')}
-    <div class="turn-allocations" aria-label="Изменение счёта за ход"><span>Изменение счёта за ход</span>${summary.allocations.map(item => `<div><span>${esc(item.teamName)}</span><strong>${item.delta >= 0 ? '+' : ''}${item.delta}</strong></div>`).join('')}</div>
+    ${renderAdditionalTurnChanges(summary)}
     <p class="fine-print">${playStyle(game) === 'teams' ? `Следующая: ${esc(activeTeam().name)}.` : `Далее: ${esc(turnRoles(game).explainers)} → ${esc(turnRoles(game).guessers)}.`} ${game.mode === 'classic' && activeTeam().stealNext ? 'Для этой команды готов ход перехвата.' : ''}</p>
     <button class="button button-primary button-large button-full" data-action="next-turn">Передать ход →</button></div></main>`;
 }

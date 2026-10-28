@@ -51,3 +51,18 @@ export function buildTurnSummary(game, teamIndex = game.activeTeam) {
     lastWord: lastWord ? { word: lastWord.word, teamIndex: lastWord.teamIndex, teamName: game.teams[lastWord.teamIndex]?.name || null, ...(lastAction?.previousScores?.length > 1 ? {recipients:lastAction.previousScores.map(item => game.teams[item.teamIndex].name)} : {}) } : null
   };
 }
+
+// Show only information not already explained by the main result or last-word card.
+export function additionalTurnChanges(summary) {
+  const allocations = summary.allocations || [];
+  const changed = allocations.filter(item => item.delta !== 0);
+  const showOwn = Boolean(summary.special && changed.length > 1);
+  const last = summary.lastWord;
+  return allocations.flatMap(item => {
+    if (item.teamIndex === summary.teamIndex && !showOwn) return [];
+    const coveredByLastWord = Boolean(last?.teamName && (last.recipients?.length
+      ? last.recipients.includes(item.teamName) : item.teamIndex === last.teamIndex));
+    const delta = item.delta - (coveredByLastWord ? 1 : 0);
+    return delta ? [{...item,delta,excludingLastWord:coveredByLastWord}] : [];
+  });
+}
