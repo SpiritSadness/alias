@@ -1,3 +1,4 @@
+import { turnWords } from './review.js?v=19';
 export const TEAM_COLORS = [
   ['Лайм','#d9ff69'],['Коралл','#ff816b'],['Небо','#80b7ff'],['Лаванда','#b9a0ff'],
   ['Персик','#ffc77b'],['Мята','#7be2d0'],['Роза','#ff9dca'],['Солнце','#ffe16b'],
@@ -46,7 +47,7 @@ export function buildTurnSummary(game, teamIndex = game.activeTeam) {
     correct: game.special ? specialCorrect : (game.turnStats?.correct || 0) + ownLast,
     skipped: game.special ? Math.max(0, (game.specialPlayed || 0) - specialCorrect) : game.turnStats?.skipped || 0,
     net: game.special ? allocations.reduce((sum, item) => sum + item.delta, 0) : allocations[teamIndex].delta,
-    special: Boolean(game.special), allocations,
+    special: Boolean(game.special), allocations, words: turnWords(game),
     lastWord: lastWord ? { word: lastWord.word, teamIndex: lastWord.teamIndex, teamName: game.teams[lastWord.teamIndex]?.name || null } : null
   };
 }

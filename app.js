@@ -1,11 +1,13 @@
 import { PACKS, WORDS } from './words.js?v=16';
-import { getSeen, reserveWord, getGame, saveGame as storeGame, getSession, saveSession, exportSeen, importSeen, requestPersistentStorage } from './storage.js?v=18';
-import { renderInstallHint, handleInstallAction, initPwa } from './pwa.js?v=18';
-import { renderPreferences, togglePreference, unlockAudio, playSound } from './preferences.js?v=18';
-import { matchesWordSettings, buildTurnSummary, TEAM_COLORS, teamColor, selectedCategories, tieContenders, targetOutcome } from './game-rules.js?v=18';
+import { getSeen, reserveWord, getGame, saveGame as storeGame, getSession, saveSession, getDefinitionReports, reportDefinition, exportSeen, importSeen, requestPersistentStorage } from './storage.js?v=19';
+import { renderInstallHint, handleInstallAction, initPwa } from './pwa.js?v=19';
+import { renderPreferences, togglePreference, unlockAudio, playSound } from './preferences.js?v=19';
+import { matchesWordSettings, buildTurnSummary, TEAM_COLORS, teamColor, selectedCategories, tieContenders, targetOutcome } from './game-rules.js?v=19';
 import { pauseGame, readCheckpoint, writeCheckpoint, restoreGame } from './session.js?v=18';
 import { createNavigation } from './navigation.js?v=18';
 import { DEFINITIONS } from './definitions.js?v=18';
+
+import { canReview, reviewWords, turnWords } from './review.js?v=19';
 
 const root = document.querySelector('#app');
 const toastNode = document.querySelector('#toast');
@@ -23,6 +25,8 @@ let uiSaveTimer;
 let lastCheckpointAt = 0;
 let colorTeamIndex = 0;
 let startingConfirmed = false;
+let definitionReports = {};
+let reviewedWord = null;
 let draft = {
   mode: 'classic', timerMode: 'round', roundSeconds: 120, wordSeconds: 30,
   scoreMode: 'round', roundCount: 3, targetScore: 30, category: 'all', categories: [], difficulty: 'mixed', skipPenalty: 0, tieMode: 'round',
@@ -102,7 +106,7 @@ function renderHome() {
 
 function teamFields() {
   return draft.teams.map((team, teamIndex) => `<div class="team-card">
-    <div class="team-top"><button class="team-color-button" data-action="open-colors" data-team="${teamIndex}" style="--team-color:${teamColor(team, teamIndex)}" aria-label="Цвет команды ${teamIndex + 1}" title="Выбрать цвет">◉</button>
+    <div class="team-top"><button class="team-color-button" data-action="open-colors" data-team="${teamIndex}" style="--team-color:${teamColor(team, teamIndex)}" aria-label="Цвет команды ${teamIndex + 1}" title="Выбрать цвет"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg></button>
       <input class="team-name" aria-label="Название команды ${teamIndex + 1}" data-field="team-name" data-team="${teamIndex}" value="${esc(team.name)}" maxlength="30">
       ${draft.teams.length > 2 ? `<button class="remove-button" data-action="remove-team" data-team="${teamIndex}" aria-label="Удалить команду">×</button>` : ''}</div>
     <div class="players">${team.players.map((player, playerIndex) => `<div class="player-row"><input class="player-input" aria-label="Игрок ${playerIndex + 1} команды ${teamIndex + 1}" data-field="player" data-team="${teamIndex}" data-player="${playerIndex}" value="${esc(player)}" maxlength="24">
@@ -159,7 +163,7 @@ function setupSummary() {
     <div class="setup-footer"><button class="button button-primary button-full button-large" data-action="start-game">Начать партию ↗</button><div id="setup-error"></div></div>
     <details class="history-panel"><summary>История слов</summary><p class="field-note">Сайт запоминает показанные слова в этом браузере, чтобы не выдать их снова в другой партии. Скачайте историю, если хотите перенести её на другой телефон или сохранить перед очисткой браузера. Загрузка добавит использованные слова, но не перенесёт текущую партию.</p><div class="settings-tools"><button class="button button-ghost button-small" data-action="export-history">Скачать историю</button>
       <button class="button button-ghost button-small" data-action="import-history">Загрузить историю</button><input type="file" id="history-file" accept="application/json,.json"></div></details>
-    <details class="history-panel"><summary>О словаре</summary><p class="field-note">${WORDS.length.toLocaleString('ru')} карточек. Уже показанные слова исключаются из всех новых ходов и партий на этом устройстве. Толкование можно открыть кнопкой «Значение слова»; таймер при этом останавливается. Темы и уровни прошли автоматическую разметку и выборочную проверку; неоднозначные слова оставлены в «Разном». <a href="./word-data-notice.txt" target="_blank" rel="noopener">Источник и лицензия</a></p></details>
+    <details class="history-panel"><summary>О словаре</summary><p class="field-note">${WORDS.length.toLocaleString('ru')} карточек. Уже показанные слова исключаются из всех новых ходов и партий на этом устройстве. Толкования доступны после хода в разделе «Разобрать слова» и после партии в списке слов. Темы и уровни прошли автоматическую разметку и выборочную проверку; неоднозначные слова оставлены в «Разном». <a href="./word-data-notice.txt" target="_blank" rel="noopener">Источник и лицензия</a></p></details>
   </aside>`;
 }
 
@@ -248,7 +252,6 @@ function renderPlaying() {
     ${renderTimer()}
     <div class="word-card ${game.timer?.paused ? 'paused-word' : ''}" id="word-card"><span class="word-hint">Объясни это слово</span><strong>${esc(word.text)}</strong>
       <div class="word-meta"><span>${word.emoji} ${esc(word.categoryName)}</span><span>${esc(word.difficultyName)}</span>${game.mode === 'classic' ? `<span>№ ${game.slot}</span>` : ''}</div></div>
-    <div class="word-tools"><button class="definition-button" data-action="open-definition">Значение слова</button></div>
     ${game.timer?.paused ? `<button class="button button-primary button-full button-large" style="margin-top:17px" data-action="resume-timer">▶ Продолжить</button>` : game.special ?
       `<p class="field-note">Кто первым угадал это слово?</p><div class="winner-grid">${game.teams.map((item, index) => `<button class="button button-secondary" data-action="special-answer" data-index="${index}">${esc(item.name)} +1</button>`).join('')}<button class="button button-ghost" data-action="special-answer" data-index="-1">Никто</button></div>` :
       `<div class="action-grid"><button class="button button-secondary" data-action="skip">Пропустить ${game.mode === 'classic' || game.skipPenalty ? '−1' : ''}</button><button class="button button-coral" data-action="correct">Угадали +1 ↗</button></div>`}
@@ -262,9 +265,20 @@ function renderLastWord() {
   return `${gameHeader()}<main class="game-frame"><div class="turn-card center"><div class="eyebrow">Время вышло</div><div class="turn-emoji">⏱️</div><h1>Последнее слово</h1>
     <p>Если объяснение уже началось, угадывать могут все команды. Кто ответил первым?</p>
     <div class="last-word-card"><span>Последнее слово</span><strong>${esc(game.word?.text || '—')}</strong></div>
-    <div class="word-tools"><button class="definition-button" data-action="open-definition">Значение слова</button></div>
     <div class="winner-grid">${game.teams.map((team, index) => `<button class="button button-secondary" data-action="last-word" data-index="${index}">${esc(team.name)} +1</button>`).join('')}
     <button class="button button-ghost" data-action="last-word" data-index="-1">Никто не угадал</button></div></div></main>`;
+}
+
+function renderWordReview(scope = 'all') {
+  const words = reviewWords(game, scope);
+  if (!words.length) return '';
+  const labels = { guessed:'Угадано', skipped:'Пропущено', unanswered:'Без ответа', shown:'Без ответа' };
+  return `<details class="word-review"><summary>${scope === 'all' ? 'Слова партии' : 'Разобрать слова'} · ${words.length}</summary><p class="field-note">Нажмите на слово, чтобы посмотреть значение.</p><div class="review-list">${words.map(word => `<button class="review-word" data-action="open-definition" data-word="${esc(word.text)}"><span>${esc(word.text)}</span><small>${labels[word.status] || 'Без ответа'}</small></button>`).join('')}</div></details>`;
+}
+function resolvedReviewWord(text) {
+  const entry = reviewWords(game).find(word => word.text === text);
+  if (!entry) return null;
+  return WORDS.find(word => word.text === text) || entry;
 }
 
 function renderLastWordAward(summary) {
@@ -284,7 +298,7 @@ function renderRound() {
   return `${gameHeader()}<main class="game-frame"><div class="turn-card center"><div class="eyebrow">Ход завершён</div><div class="turn-emoji">👏</div><h1>${esc(summary.teamName)}</h1>
     <p>${summary.special ? 'Результат хода перехвата для всех команд.' : 'Результат команды за этот ход.'}</p>
     <div class="turn-results"><div class="turn-result"><strong>${summary.correct}</strong><small>${summary.special ? 'угадано всего' : 'угадано командой'}</small></div><div class="turn-result"><strong>${summary.skipped}</strong><small>пропущено</small></div><div class="turn-result"><strong>${summary.net >= 0 ? '+' : ''}${summary.net}</strong><small>${summary.special ? 'очков всем командам' : 'очков команде'}</small></div></div>
-    ${renderLastWordAward(summary)}
+    ${renderLastWordAward(summary)}${renderWordReview('turn')}
     <div class="turn-allocations" aria-label="Изменение счёта за ход"><span>Изменение счёта за ход</span>${summary.allocations.map(item => `<div><span>${esc(item.teamName)}</span><strong>${item.delta >= 0 ? '+' : ''}${item.delta}</strong></div>`).join('')}</div>
     <p class="fine-print">Следующая: ${esc(activeTeam().name)}. ${game.mode === 'classic' && activeTeam().stealNext ? 'Для этой команды готов ход перехвата.' : ''}</p>
     <button class="button button-primary button-large button-full" data-action="next-turn">Передать ход →</button></div></main>`;
@@ -298,7 +312,7 @@ function renderRoundResult() {
     <h1>${winners.length === 1 ? `${esc(winners[0].name)} выиграла раунд!` : 'Ничья в раунде!'}</h1>
     <p>${game.teams.map(team => `${esc(team.name)} — ${team.score} ${team.score % 10 === 1 && team.score % 100 !== 11 ? 'очко' : [2, 3, 4].includes(team.score % 10) && ![12, 13, 14].includes(team.score % 100) ? 'очка' : 'очков'}`).join(' · ')}</p>
     ${game.roundCount ? `<p class="fine-print">Выиграно раундов: ${game.teams.map((team, index) => `${esc(team.name)} — ${wins[index]}`).join(' · ')}. В следующем раунде очки за слова начнутся с нуля.</p>` : '<p class="fine-print">В следующем раунде очки начнутся с нуля.</p>'}
-    ${renderLastWordAward(game.lastSummary)}${renderLastWordsHistory(true)}
+    ${renderLastWordAward(game.lastSummary)}${renderLastWordsHistory(true)}${renderWordReview('round')}
     <div class="game-actions"><button class="button button-primary button-large" data-action="new-round">Следующий раунд ↗</button><button class="button button-secondary button-large" data-action="new-game">Новая игра</button></div></div></main>`;
 }
 
@@ -321,7 +335,7 @@ function renderRoundFinished() {
     ${extraRounds ? `<p class="fine-print">Основных раундов: ${game.roundCount} · дополнительных: ${extraRounds}</p>` : ''}
     <p class="fine-print">${needsDecision ? canContinue ? sudden ? 'Решающее слово отгадывают команды с одинаковым числом побед. Первый правильный ответ определит победителя партии.' : 'В дополнительном раунде каждая команда сыграет по одному ходу. При новой ничьей можно повторить или закончить вничью.' : 'Для продолжения не хватает новых слов. Партию можно закончить вничью.' : 'Ничьи в раундах не дают победу ни одной команде.'}</p>
     <details class="round-history"><summary>Результаты раундов</summary>${history.map((round, index) => `<div><span>${roundName(index + 1)}</span><span>${round.scores.map((score, teamIndex) => `${esc(game.teams[teamIndex].name)} ${score}`).join(' · ')}</span></div>`).join('')}</details>
-    ${renderTiebreakResult()}${renderLastWordAward(game.lastSummary)}${renderLastWordsHistory()}
+    ${renderTiebreakResult()}${renderLastWordAward(game.lastSummary)}${renderLastWordsHistory()}${renderWordReview() }
     <div class="game-actions">${needsDecision ? `${canContinue ? `<button class="button button-primary button-large" data-action="${sudden ? 'start-tiebreak' : 'new-round'}">${sudden ? 'Решающее слово' : 'Дополнительный раунд'} ↗</button>` : ''}<button class="button button-secondary button-large" data-action="finish-draw">Закончить вничью</button>` : '<button class="button button-primary button-large" data-action="new-game">Новая партия ↗</button><button class="button button-secondary button-large" data-action="home">На главную</button>'}</div></div></main>`;
 }
 
@@ -331,7 +345,7 @@ function renderTiebreakResult() {
 
 function renderGameTie() {
   const sudden = game.mode === 'classic' || game.tieMode === 'sudden';
-  return `${gameHeader()}<main class="game-frame"><section class="turn-card center"><div class="eyebrow">Равный счёт на финише</div><h1>Ничья!</h1><p>Все команды сыграли одинаковое число ходов. ${sudden ? 'Победителя определит одно слово: кто ответит первым.' : 'Каждая команда получит ещё по одному ходу.'}</p><div class="game-actions"><button class="button button-primary" data-action="${sudden ? 'start-tiebreak' : 'extra-target'}">${sudden ? 'Решающее слово' : 'Ещё полный круг'} →</button><button class="button button-secondary" data-action="finish-draw">Закончить вничью</button></div></section></main>`;
+  return `${gameHeader()}<main class="game-frame"><section class="turn-card center"><div class="eyebrow">Равный счёт на финише</div><h1>Ничья!</h1><p>Все команды сыграли одинаковое число ходов. ${sudden ? 'Победителя определит одно слово: кто ответит первым.' : 'Каждая команда получит ещё по одному ходу.'}</p>${renderWordReview()}<div class="game-actions"><button class="button button-primary" data-action="${sudden ? 'start-tiebreak' : 'extra-target'}">${sudden ? 'Решающее слово' : 'Ещё полный круг'} →</button><button class="button button-secondary" data-action="finish-draw">Закончить вничью</button></div></section></main>`;
 }
 
 function renderSuddenHandoff() {
@@ -340,22 +354,22 @@ function renderSuddenHandoff() {
 }
 
 function renderSuddenWord() {
-  return `${gameHeader()}<main class="game-frame"><section class="turn-card center"><div class="eyebrow">Решающее слово</div><div class="word-card"><span class="word-hint">Ведущий объясняет всем финалистам</span><strong>${esc(game.word.text)}</strong><button class="definition-button" data-action="open-definition">Что значит слово?</button></div><p class="field-note" style="margin-top:18px">Кто ответил первым?</p><div class="winner-grid">${game.suddenContenders.map(index => `<button class="button button-secondary" data-action="sudden-answer" data-index="${index}">${esc(game.teams[index].name)} угадала</button>`).join('')}</div><button class="button button-ghost" data-action="skip-sudden">Другое слово</button></section></main>`;
+  return `${gameHeader()}<main class="game-frame"><section class="turn-card center"><div class="eyebrow">Решающее слово</div><div class="word-card"><span class="word-hint">Ведущий объясняет всем финалистам</span><strong>${esc(game.word.text)}</strong></div><p class="field-note" style="margin-top:18px">Кто ответил первым?</p><div class="winner-grid">${game.suddenContenders.map(index => `<button class="button button-secondary" data-action="sudden-answer" data-index="${index}">${esc(game.teams[index].name)} угадала</button>`).join('')}</div><button class="button button-ghost" data-action="skip-sudden">Другое слово</button></section></main>`;
 }
 
 function renderTieEmpty() {
-  return `${gameHeader()}<main class="game-frame"><section class="turn-card center"><h1>Новые слова закончились</h1><p>Для решающего слова нужен свежий набор. Эту партию можно завершить вничью.</p><button class="button button-primary" data-action="finish-draw">Завершить вничью</button></section></main>`;
+  return `${gameHeader()}<main class="game-frame"><section class="turn-card center"><h1>Новые слова закончились</h1><p>Для решающего слова нужен свежий набор. Эту партию можно завершить вничью.</p>${renderWordReview()}<button class="button button-primary" data-action="finish-draw">Завершить вничью</button></section></main>`;
 }
 
 function renderDrawFinished() {
-  return `${gameHeader()}<main class="game-frame"><section class="turn-card center"><div class="eyebrow">Партия завершена</div><h1>Ничья!</h1><p>${game.teams.map(team => `${esc(team.name)} — ${team.score}`).join(' · ')}</p>${renderLastWordsHistory()}<button class="button button-primary" data-action="new-game">Новая партия →</button></section></main>`;
+  return `${gameHeader()}<main class="game-frame"><section class="turn-card center"><div class="eyebrow">Партия завершена</div><h1>Ничья!</h1><p>${game.teams.map(team => `${esc(team.name)} — ${team.score}`).join(' · ')}</p>${renderLastWordsHistory()}${renderWordReview() }<button class="button button-primary" data-action="new-game">Новая партия →</button></section></main>`;
 }
 
 function renderFinished() {
   const winner = game.teams.reduce((best, team) => team.score > best.score ? team : best, game.teams[0]);
   return `${gameHeader()}<main class="game-frame"><div class="turn-card center"><div class="finish-trophy">★</div><div class="eyebrow">Партия завершена</div>
     <h1>Победа у ${esc(winner.name)}!</h1><p>Вы набрали ${winner.score} очков. Сыграем ещё? Новая партия начнётся с новых слов.</p>
-    ${renderTiebreakResult()}${renderLastWordAward(game.lastSummary)}${renderLastWordsHistory()}
+    ${renderTiebreakResult()}${renderLastWordAward(game.lastSummary)}${renderLastWordsHistory()}${renderWordReview() }
     <div class="game-actions"><button class="button button-primary button-large" data-action="new-game">Новая партия ↗</button><button class="button button-secondary button-large" data-action="home">На главную</button></div></div></main>`;
 }
 
@@ -434,12 +448,15 @@ async function nextWord() {
     game.timer.remainingMs = game.timer.durationMs;
     game.timer.deadline = Date.now() + game.timer.durationMs;
   }
-  if (word) seen.add(word.family);
+  if (word) { seen.add(word.family); game.turnWords ||= []; game.turnWords.push({text:word.text,family:word.family,status:'unanswered'}); }
   await saveGame(game);
   render();
 }
 
 async function reserveSuddenWord() {
+  game.decidingWords ||= [];
+  const previous = game.decidingWords.at(-1);
+  if (previous && previous.status !== 'guessed') previous.status = 'skipped';
   delete game.countdownNext;
   delete game.countdownEndsAt;
   delete game.countdownValue;
@@ -451,7 +468,7 @@ async function reserveSuddenWord() {
   game.word = word;
   game.pendingWord = false;
   game.phase = word ? 'suddenWord' : 'tieEmpty';
-  if (word) seen.add(word.family);
+  if (word) { seen.add(word.family); game.decidingWords.push({text:word.text,family:word.family,status:'unanswered'}); }
   await saveGame(game);
   render();
 }
@@ -471,6 +488,7 @@ async function startTurn() {
   game.turnStats = { correct: 0, skipped: 0, mistakes: 0 };
   game.specialPlayed = 0;
   game.actions = [];
+  game.turnWords = [];
   game.phase = 'playing';
   game.timer = game.special ? null : {
     durationMs: (game.mode === 'classic' ? 60 : game.timerMode === 'round' ? game.roundSeconds : game.wordSeconds) * 1000,
@@ -485,6 +503,8 @@ async function startTurn() {
 
 function recordScore(teamIndex, delta, type, label) {
   const team = game.teams[teamIndex];
+  const review = game.turnWords?.find(word => word.text === game.word?.text);
+  if (review) review.status = ['correct','special','last'].includes(type) ? 'guessed' : 'skipped';
   const previousScore = team.score;
   team.score = Math.max(0, team.score + delta);
   game.actions.push({ teamIndex, previousScore, delta: team.score - previousScore, type, label, word: game.word?.text || '' });
@@ -504,6 +524,7 @@ async function answer(type) {
 async function specialAnswer(index) {
   if (game.phase !== 'playing' || !game.special) return;
   if (index >= 0) recordScore(index, 1, 'special', `${game.teams[index].name} +1`);
+  if (index < 0 && game.turnWords?.at(-1)) game.turnWords.at(-1).status = 'skipped';
   game.specialPlayed++;
   if (game.specialPlayed >= 5) await finishTurn(); else await nextWord();
 }
@@ -577,16 +598,22 @@ async function handleAction(action, button) {
     closeOverlay(); persistUi(); return;
   }
   if (action === 'open-definition') {
-    if (!game?.word) return;
-    pauseGame(game);
-    await saveGame(game);
-    render();
-    root.querySelector('#definition-title').textContent = game.word.text;
-    const meanings = DEFINITIONS[game.word.family] || [];
-    root.querySelector('#definition-body').innerHTML = meanings.length ? meanings.map(text => `<p>${esc(text)}</p>`).join('') : '<p>Короткое толкование пока не добавлено.</p>';
-    root.querySelector('#definition-body').insertAdjacentHTML('beforeend', `<p class="definition-source"><a href="https://ru.wiktionary.org/wiki/${encodeURIComponent(game.word.text)}" target="_blank" rel="noopener">Викисловарь · источник</a></p>${game.timer?.paused ? '<p class="field-note">Таймер на паузе. После чтения нажмите «Продолжить».</p>' : ''}`);
+    if (!canReview(game) || view !== 'game') return;
+    const word = resolvedReviewWord(button.dataset.word);
+    if (!word) return;
+    reviewedWord = word;
+    root.querySelector('#definition-title').textContent = word.text;
+    const meanings = DEFINITIONS[word.family] || [];
+    root.querySelector('#definition-body').innerHTML = (meanings.length ? meanings.map(text => `<p>${esc(text)}</p>`).join('') : '<p>Короткое толкование пока не добавлено.</p>') + `<p class="definition-source"><a href="https://ru.wiktionary.org/wiki/${encodeURIComponent(word.text)}" target="_blank" rel="noopener">Викисловарь · источник</a></p><button class="definition-report" data-action="report-definition" ${definitionReports[word.family] ? 'disabled' : ''}>${definitionReports[word.family] ? 'Отмечено на этом устройстве' : 'Непонятное значение'}</button><p class="field-note">Отметки хранятся на этом устройстве.</p>`;
     root.querySelector('#definition-dialog').showModal();
     return;
+  }
+  if (action === 'report-definition') {
+    if (!canReview(game) || !reviewedWord || !root.querySelector('#definition-dialog')?.open) return;
+    await reportDefinition(reviewedWord);
+    definitionReports[reviewedWord.family] = true;
+    button.disabled = true; button.textContent = 'Отмечено на этом устройстве';
+    showToast('Толкование отмечено'); return;
   }
   if (action === 'home') return showHome();
   if (action === 'new-game') { pauseGame(game); if (game) await saveGame(game); startingConfirmed = false; view = 'setup'; render(); return; }
@@ -629,6 +656,7 @@ async function handleAction(action, button) {
   if (action === 'sudden-answer' && game.phase === 'suddenWord') {
     const index = Number(button.dataset.index);
     if (!game.suddenContenders.includes(index)) return;
+    if (game.decidingWords?.at(-1)) game.decidingWords.at(-1).status = 'guessed';
     game.tiebreak = { winnerIndex: index, word: game.word.text };
     const roundMode = game.mode === 'custom' && game.scoreMode === 'round';
     if (!roundMode) game.teams[index].score++;
@@ -678,6 +706,8 @@ async function handleAction(action, button) {
   if (action === 'undo') {
     const previous = game.actions.pop();
     if (!previous) return;
+    const review = game.turnWords?.find(word => word.text === previous.word);
+    if (review) review.status = 'unanswered';
     game.teams[previous.teamIndex].score = previous.previousScore;
     if (previous.type === 'correct') game.turnStats.correct--;
     if (previous.type === 'skip') game.turnStats.skipped--;
@@ -785,7 +815,8 @@ window.addEventListener('pageshow', event => { if (event.persisted && ready) ren
 
 async function init() {
   try {
-    const [savedSeen, savedGame, savedUi] = await Promise.all([getSeen(), getGame(), getSession()]);
+    const [savedSeen, savedGame, savedUi, savedReports] = await Promise.all([getSeen(), getGame(), getSession(), getDefinitionReports()]);
+    definitionReports = savedReports;
     seen = savedSeen;
     const backup = readCheckpoint();
     const ui = backup && (!savedUi || backup.savedAt >= savedUi.savedAt) ? backup : savedUi;
@@ -798,6 +829,7 @@ async function init() {
     view = ['home','setup','game'].includes(ui?.view) ? ui.view : game && !['finished','roundFinished','drawFinished'].includes(game.phase) ? 'game' : 'home';
     if (view === 'game' && !game) view = 'home';
     restoreGame(game);
+    if (game && ['playing','lastWord'].includes(game.phase) && !game.turnWords) game.turnWords = turnWords(game);
     if (game) game.tieMode ||= game.mode === 'classic' ? 'sudden' : 'round';
     if (game && ['playing','suddenWord'].includes(game.phase) && (!game.word || game.pendingWord)) {
       const { word } = await reserveWord(poolForTurn());

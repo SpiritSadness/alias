@@ -109,3 +109,20 @@ export async function requestPersistentStorage() {
     if (navigator.storage?.persist) await navigator.storage.persist();
   } catch { /* The game still works when persistence is unavailable. */ }
 }
+
+export async function getDefinitionReports() {
+  const db = await openDb();
+  return transactionResult(db, 'meta', 'readonly', (store, set) => {
+    store.get('definition-reports').onsuccess = event => set(event.target.result || {});
+  });
+}
+export async function reportDefinition(word) {
+  const db = await openDb();
+  await transactionResult(db, 'meta', 'readwrite', store => {
+    store.get('definition-reports').onsuccess = event => {
+      const reports = event.target.result || {};
+      reports[word.family] = { text:word.text, reportedAt:new Date().toISOString() };
+      store.put(reports, 'definition-reports');
+    };
+  });
+}

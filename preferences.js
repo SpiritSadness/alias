@@ -3,7 +3,7 @@ let soundEnabled = true;
 try { soundEnabled = localStorage.getItem('alias-sound') !== 'off'; } catch { /* Defaults are usable without storage. */ }
 let audioContext;
 let masterGain;
-const icon = enabled => enabled ? '♫' : '♪̸';
+const icon = enabled => `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4V5Z"/>${enabled ? '<path d="M15 8a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14"/>' : '<path d="m16 9 5 6m0-6-5 6"/>'}</svg>`;
 export function renderPreferences() {
   return `<button class="icon-button" data-action="toggle-theme" aria-label="${theme === 'dark' ? 'Включить светлую тему' : 'Включить тёмную тему'}" title="Сменить тему">${theme === 'dark' ? '☀' : '☾'}</button><button class="icon-button" data-action="toggle-sound" aria-label="${soundEnabled ? 'Выключить звуки' : 'Включить звуки'}" aria-pressed="${soundEnabled}" title="${soundEnabled ? 'Звук включён' : 'Звук выключен'}">${icon(soundEnabled)}</button>`;
 }
