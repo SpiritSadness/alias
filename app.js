@@ -1,15 +1,16 @@
-import { PACKS, WORDS } from './words.js?v=23';
-import { getSeen, saveGameAndReserveWord, getGameRecord, saveGame as storeGame, getSession, saveSession, getDefinitionReports, reportDefinition, exportSeen, importSeen, requestPersistentStorage } from './storage.js?v=23';
-import { renderInstallHint, handleInstallAction, initPwa } from './pwa.js?v=23';
+import { readHistoryFile } from './history.js?v=24';
+import { PACKS, WORDS } from './words.js?v=24';
+import { getSeen, saveGameAndReserveWord, getGameRecord, saveGame as storeGame, getSession, saveSession, getDefinitionReports, reportDefinition, exportSeen, importSeen, requestPersistentStorage } from './storage.js?v=24';
+import { renderInstallHint, handleInstallAction, initPwa } from './pwa.js?v=24';
 import { renderPreferences, togglePreference, unlockAudio, playSound } from './preferences.js?v=19';
-import { matchesWordSettings, buildTurnSummary, TEAM_COLORS, teamColor, selectedCategories, tieContenders, targetOutcome, additionalTurnChanges } from './game-rules.js?v=23';
-import { pauseGame, readCheckpoint, writeCheckpoint, restoreGame, gameIdentity, normaliseSettings } from './session.js?v=23';
-import { createNavigation } from './navigation.js?v=18';
-import { DEFINITIONS } from './definitions.js?v=23';
+import { matchesWordSettings, buildTurnSummary, TEAM_COLORS, teamColor, selectedCategories, tieContenders, targetOutcome, additionalTurnChanges } from './game-rules.js?v=24';
+import { pauseGame, readCheckpoint, writeCheckpoint, restoreGame, gameIdentity, normaliseSettings } from './session.js?v=24';
+import { createNavigation } from './navigation.js?v=24';
+import { DEFINITIONS } from './definitions.js?v=24';
 
-import { canReview, reviewWords, turnWords } from './review.js?v=23';
+import { canReview, reviewWords, turnWords } from './review.js?v=24';
 
-import { PLAY_STYLES, playStyle, playStyleName, entrants, makePairSchedule, turnRoles, advanceTurn, nextCycle, lastGuessers, applyScore, undoScore } from './play-modes.js?v=23';
+import { PLAY_STYLES, playStyle, playStyleName, entrants, makePairSchedule, turnRoles, advanceTurn, nextCycle, lastGuessers, applyScore, undoScore } from './play-modes.js?v=24';
 
 const root = document.querySelector('#app');
 const toastNode = document.querySelector('#toast');
@@ -30,7 +31,9 @@ let colorTeamIndex = 0;
 let startingConfirmed = false;
 let definitionReports = {};
 let reviewedWord = null;
+let pendingHistory = null;
 let draft = {
+  setupStep:0, setupFurthest:0,
   playStyle: 'teams', participants: [{id:'person-a',name:'Аня'},{id:'person-b',name:'Паша'},{id:'person-c',name:'Маша'}],
   mode: 'classic', timerMode: 'round', roundSeconds: 120, wordSeconds: 30,
   scoreMode: 'round', roundCount: 3, targetScore: 30, category: 'all', categories: [], difficulty: 'mixed', skipPenalty: 0, tieMode: 'round',
@@ -107,6 +110,7 @@ function renderHome() {
       <h1>Сыграем <em>в Alias?</em></h1>
       <div class="hero-actions"><button class="button button-primary button-large" data-action="new-game">Начать игру <span aria-hidden="true">↗</span></button>
       ${resume ? '<button class="button button-secondary button-large" data-action="resume-game">Продолжить партию</button>' : ''}</div>
+      ${draft.previousSettings&&!resume?'<button class="link-button repeat-setup" data-action="repeat-settings">Повторить настройки →</button>':''}
       <div id="install-panel">${renderInstallHint()}</div>
     </section>
   </main>`;
@@ -134,6 +138,7 @@ function setupDialogs() {
   const selected = selectedCategories(draft);
   return `<dialog class="sheet-dialog" id="categories-dialog" aria-labelledby="categories-title"><div class="sheet-heading"><h2 id="categories-title">Темы для игры</h2><button class="icon-button" data-action="close-dialog" aria-label="Закрыть выбор тем">×</button></div><p class="field-note">Выберите одну или несколько тем. Категория 18+ включается только отдельно.</p><button class="category-all ${!selected.length ? 'selected' : ''}" data-action="categories-all" aria-pressed="${!selected.length}">Все темы · без 18+</button><div class="category-options">${PACKS.map(pack => `<label class="${pack.optIn ? 'adult-category' : ''}"><input type="checkbox" data-field="category-multi" value="${pack.id}" ${selected.includes(pack.id) ? 'checked' : ''}><span class="category-emoji">${pack.emoji}</span><span>${esc(pack.name)}${pack.optIn ? '<small>Секс, свидания, отношения и неловкие ситуации</small>' : ''}</span></label>`).join('')}</div><div class="sheet-footer"><span id="category-selection">${esc(categoryLabel())}</span><button class="button button-primary" data-action="close-dialog">Готово</button></div></dialog>
   <dialog class="sheet-dialog" id="colors-dialog" aria-labelledby="colors-title"><div class="sheet-heading"><h2 id="colors-title">Цвет команды</h2><button class="icon-button" data-action="close-dialog" aria-label="Закрыть выбор цвета">×</button></div><div id="color-options" class="color-options"></div></dialog>
+  <dialog class="sheet-dialog" id="history-import-dialog" aria-labelledby="history-import-title"><h2 id="history-import-title">Загрузить историю?</h2><p id="history-import-description"></p><div class="dialog-actions"><button class="button button-primary" data-action="confirm-history-import">Добавить в историю</button><button class="button button-secondary" data-action="close-dialog">Отмена</button></div></dialog>
   <dialog class="sheet-dialog" id="new-game-dialog" aria-labelledby="new-game-title"><h2 id="new-game-title">Начать новую партию?</h2><p>Текущая партия ещё не завершена. История слов сохранится.</p><div class="dialog-actions"><button class="button button-primary" data-action="resume-game">Продолжить текущую</button><button class="button button-secondary" data-action="confirm-start">Начать новую</button><button class="button button-ghost" data-action="close-dialog">Остаться в настройках</button></div></dialog>`;
 }
 
@@ -146,64 +151,72 @@ function refreshCategoryUi() {
   for (const node of root.querySelectorAll('#category-selection, #category-button-label')) node.textContent = categoryLabel();
   const summary = root.querySelector('#setup-summary-values');
   if (summary) summary.innerHTML = setupSummaryDetails();
+  const count=root.querySelector('#setup-word-count');if(count)count.textContent=freshWordCount().toLocaleString('ru');
   persistUi();
 }
 
+const SETUP_STEPS = ['Как играем','Участники','Правила','Слова','Старт'];
+function settingsSnapshot(source) {
+  const keys=['playStyle','mode','timerMode','roundSeconds','wordSeconds','scoreMode','roundCount','targetScore','category','categories','difficulty','skipPenalty','tieMode','participants','teams'];
+  return structuredClone(Object.fromEntries(keys.filter(key=>source[key]!==undefined).map(key=>[key,source[key]])));
+}
+function freshWordCount() { return WORDS.filter(word=>matchesWordSettings(word,draft)&&!seen.has(word.family)).length; }
+function summaryRow(step,label,value) {
+  return `<button class="setup-review-row" data-action="setup-step" data-step="${step}" aria-label="Изменить: ${label}"><span>${label}</span><strong>${esc(value)}</strong><span class="review-arrow" aria-hidden="true">↗</span></button>`;
+}
 function setupSummaryDetails() {
-  const mode = draft.mode === 'classic' ? 'Классический' : 'Кастом';
-  const roundScoring = draft.mode === 'custom' && draft.scoreMode === 'round';
-  const timer = draft.mode === 'classic' ? '01:00 на все слова хода' : draft.timerMode === 'round' ? `${formatTime(draft.roundSeconds * 1000)} на все слова хода` : `${formatTime(draft.wordSeconds * 1000)} на каждое слово`;
-  const selectedWords = WORDS.filter(word => matchesWordSettings(word, draft));
-  const pool = selectedWords.filter(word => !seen.has(word.family));
-  return `<div class="summary-rule"><span>Режим</span><strong>${playStyleName(draft)}</strong></div><div class="summary-rule"><span>Правила</span><strong>${mode}</strong></div>
-    <div class="summary-rule"><span>${playStyle(draft) === 'pairs' ? 'Игроки' : 'Команды'}</span><strong>${entrants(draft).length}</strong></div>
-    <div class="summary-rule"><span>Темы</span><strong>${esc(categoryLabel())}</strong></div>
-    <div class="summary-rule"><span>Таймер</span><strong>${esc(timer)}</strong></div>
-    <div class="summary-rule"><span>Победа</span><strong>${roundScoring ? 'больше выигранных раундов' : `до ${draft.targetScore} очков`}</strong></div>
-    <div class="summary-rule"><span>При ничьей</span><strong>${draft.mode === 'classic' || draft.tieMode === 'sudden' ? playStyle(draft)==='pairs'?'решающее слово; при общей ничьей — полный круг':playStyle(draft)==='versus'&&entrants(draft).every(team=>team.players.length===1)?'полный круг':'решающее слово' : 'полный раунд'}</strong></div>
-    ${roundScoring ? `<div class="summary-rule"><span>Раундов</span><strong>${draft.roundCount}</strong></div>` : ''}
-    <div class="summary-rule"><span>Не показано слов</span><strong>${pool.length}</strong></div>
-    <div class="remaining-bar"><i style="width:${selectedWords.length ? pool.length / selectedWords.length * 100 : 0}%"></i></div>
-    <p class="field-note">Счётчик показывает, сколько слов ещё не встречалось в выбранной теме${draft.mode === 'custom' ? ' и сложности' : ''}.</p>`;
+  const rounds=draft.mode==='custom'&&draft.scoreMode==='round';
+  const seconds=draft.mode==='classic'?60:draft.timerMode==='round'?draft.roundSeconds:draft.wordSeconds;
+  const timer=`${formatTime(seconds*1000)} ${draft.mode==='custom'&&draft.timerMode==='word'?'на слово':'на ход'}`;
+  return summaryRow(0,'Как играем',playStyleName(draft))+
+    summaryRow(1,playStyle(draft)==='pairs'?'Игроки':'Команды',entrants(draft).map(team=>team.name).join(' · '))+
+    summaryRow(2,'Правила',`${draft.mode==='classic'?'Классика':'Кастом'} · ${timer}`)+
+    summaryRow(2,'Победа',rounds?`${draft.roundCount} ${[2,3,4].includes(draft.roundCount)?'раунда':'раундов'} · по победам`:`До ${draft.targetScore} очков`)+
+    summaryRow(3,'Слова',`${categoryLabel()}${draft.mode==='custom'?' · '+({mixed:'Смешанная',easy:'Лёгкая',medium:'Средняя',hard:'Сложная'}[draft.difficulty]||'Смешанная'):''}`)+
+    `<p class="fresh-word-note"><span class="fresh-word-dot" aria-hidden="true"></span><strong>${freshWordCount().toLocaleString('ru')}</strong> свежих слов</p>`;
 }
-
-function setupSummary() {
-  return `<aside class="panel setup-summary"><h3 style="margin-bottom:14px">Настройки игры</h3><div id="setup-summary-values">${setupSummaryDetails()}</div>
-    <div class="setup-footer"><button class="button button-primary button-full button-large" data-action="start-game">Начать партию ↗</button><div id="setup-error"></div></div>
-    <details class="history-panel"><summary>История слов</summary><p class="field-note">Сайт запоминает показанные слова в этом браузере, чтобы не выдать их снова в другой партии. Скачайте историю, если хотите перенести её на другой телефон или сохранить перед очисткой браузера. Загрузка добавит использованные слова, но не перенесёт текущую партию.</p><div class="settings-tools"><button class="button button-ghost button-small" data-action="export-history">Скачать историю</button>
-      <button class="button button-ghost button-small" data-action="import-history">Загрузить историю</button><input type="file" id="history-file" accept="application/json,.json"></div></details>
-    <details class="history-panel"><summary>О словаре</summary><p class="field-note">${WORDS.length.toLocaleString('ru')} карточек. Уже показанные слова исключаются из всех новых ходов и партий на этом устройстве. Толкования доступны после хода в разделе «Разобрать слова» и после партии в списке слов. Темы и уровни прошли автоматическую разметку и выборочную проверку; неоднозначные слова оставлены в «Разном». <a href="./word-data-notice.txt" target="_blank" rel="noopener">Источник и лицензия</a></p></details>
-  </aside>`;
+function wordTools() {
+  return `<details class="setup-more"><summary>История и словарь</summary><p class="field-note">Показанные слова не повторяются на этом устройстве. Историю можно перенести в другой браузер.</p><div class="settings-tools"><button class="button button-secondary button-small" data-action="export-history">Скачать историю</button><button class="button button-secondary button-small" data-action="import-history">Загрузить историю</button><input type="file" id="history-file" accept="application/json,.json"></div><details class="history-panel"><summary>О словаре</summary><p class="field-note">${WORDS.length.toLocaleString('ru')} карточек. Темы и сложность размечены автоматически и выборочно проверены. Толкования доступны после хода. <a href="./word-data-notice.txt" target="_blank" rel="noopener noreferrer">Источник и лицензия</a></p></details></details>`;
 }
-
+function setupPlayers() {
+  return `<p class="setup-subtitle">${playStyle(draft)==='pairs'?'От 3 до 12 игроков.':playStyle(draft)==='versus'?'Две команды, от одного человека в каждой.':'От двух человек в каждой команде.'}</p><div class="team-grid">${teamFields()}</div>${playStyle(draft)==='pairs'?`<button class="link-button" data-action="add-participant" ${draft.participants.length>=12?'disabled':''}>+ Добавить участника</button>`:playStyle(draft)==='teams'?`<button class="link-button" data-action="add-team" ${draft.teams.length>=6?'disabled':''}>+ Добавить команду</button>`:''}`;
+}
+function setupRules() {
+  const custom=draft.mode==='custom';
+  return `<div class="mode-grid wizard-rule-cards"><button class="mode-card ${!custom?'active':''}" data-action="set-mode" data-value="classic" aria-pressed="${!custom}"><strong>Классика</strong><small>Минута на ход, пропуск −1.</small></button><button class="mode-card ${custom?'active':''}" data-action="set-mode" data-value="custom" aria-pressed="${custom}"><strong>Кастом</strong><small>Ваше время и условия победы.</small></button></div>
+    ${custom?`<div class="wizard-option"><span class="field-label">Время</span><div class="segmented"><button class="${draft.timerMode==='round'?'active':''}" data-action="set-timer-mode" data-value="round" aria-pressed="${draft.timerMode==='round'}">На ход</button><button class="${draft.timerMode==='word'?'active':''}" data-action="set-timer-mode" data-value="word" aria-pressed="${draft.timerMode==='word'}">На слово</button></div></div><div class="wizard-option"><span class="field-label">Победа</span><div class="segmented"><button class="${draft.scoreMode==='round'?'active':''}" data-action="set-score-mode" data-value="round" aria-pressed="${draft.scoreMode==='round'}">По раундам</button><button class="${draft.scoreMode==='target'?'active':''}" data-action="set-score-mode" data-value="target" aria-pressed="${draft.scoreMode==='target'}">До очков</button></div></div>`:''}
+    <div class="field-grid wizard-numbers">${!custom||draft.scoreMode==='target'?`<label class="field"><span>Цель по очкам</span><input type="number" min="5" max="200" step="1" inputmode="numeric" data-field="target-score" value="${draft.targetScore}"></label>`:`<label class="field"><span>Раундов</span><input type="number" min="2" max="20" step="1" inputmode="numeric" data-field="round-count" value="${draft.roundCount}"></label>`}${custom?`<label class="field"><span>Секунд ${draft.timerMode==='round'?'на ход':'на слово'}</span><input type="number" min="10" max="600" step="1" inputmode="numeric" data-field="${draft.timerMode==='round'?'round-seconds':'word-seconds'}" value="${draft.timerMode==='round'?draft.roundSeconds:draft.wordSeconds}"></label>`:''}</div>
+    <details class="setup-more" id="rules-more" ${draft.rulesExpanded?'open':''}><summary>${custom?'Дополнительные настройки':'Как считаются очки'}</summary>${custom?`<label class="field"><span>Штраф за пропуск</span><select data-field="skip-penalty"><option value="0" ${!draft.skipPenalty?'selected':''}>Без штрафа</option><option value="1" ${draft.skipPenalty===1?'selected':''}>−1 очко</option></select></label><div class="wizard-option"><span class="field-label">При ничьей</span><div class="segmented"><button class="${draft.tieMode!=='sudden'?'active':''}" data-action="set-tie-mode" data-value="round">Полный круг</button><button class="${draft.tieMode==='sudden'?'active':''}" data-action="set-tie-mode" data-value="sudden">Решающее слово</button></div></div>`:''}<p class="field-note">${playStyle(draft)==='pairs'?'Все пары играют в обе стороны. Очки получает только угадывающий. Если все делят первое место, играем дополнительный круг.':playStyle(draft)==='versus'?'Очки получает угадывающая команда. Обе стороны доигрывают круг.':'За угаданное слово — +1. Все команды доигрывают круг, чтобы число ходов было одинаковым.'}${custom&&draft.scoreMode==='round'?' В каждом раунде очки за слова обнуляются; в партии сравниваются победы в раундах.':''}</p></details>`;
+}
+function setupWords() {
+  return `<div class="field"><span>Темы</span><button class="category-select" data-action="open-categories" aria-haspopup="dialog" aria-controls="categories-dialog"><span id="category-button-label">${esc(categoryLabel())}</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg></button></div>
+    ${draft.mode==='custom'?`<label class="field wizard-difficulty"><span>Сложность</span><select data-field="difficulty">${[['mixed','Смешанная'],['easy','Лёгкая'],['medium','Средняя'],['hard','Сложная']].map(([id,name])=>`<option value="${id}" ${draft.difficulty===id?'selected':''}>${name}</option>`).join('')}</select></label>`:''}
+    <p class="fresh-word-note"><span class="fresh-word-dot" aria-hidden="true"></span><strong id="setup-word-count">${freshWordCount().toLocaleString('ru')}</strong> свежих слов</p>${wordTools()}`;
+}
 function renderSetup() {
-  return `${header()}<main><div class="section-head"><div><div class="eyebrow">Настройка партии</div><h1>${playStyle(draft) === 'pairs' ? 'Соберите друзей.' : 'Соберите команду.'}</h1><p>Несколько решений — и можно играть.</p></div>${game && !['finished','roundFinished','drawFinished','stopped'].includes(game.phase) ? '<button class="button button-secondary" data-action="resume-game">Вернуться к партии →</button>' : ''}</div>
-    <div class="setup-grid"><div class="stack">
-      <section class="panel"><div class="panel-head"><h3>Как играем</h3></div><div class="play-style-grid">${PLAY_STYLES.map(style => `<button class="mode-card ${playStyle(draft) === style.id ? 'active' : ''}" data-action="set-play-style" data-value="${style.id}" aria-pressed="${playStyle(draft) === style.id}"><strong>${style.name}</strong><small>${style.description}</small></button>`).join('')}</div></section>
-      <section class="panel"><div class="panel-head"><h3><span class="step">1</span> Правила</h3></div>
-        <div class="mode-grid"><button class="mode-card ${draft.mode === 'classic' ? 'active' : ''}" data-action="set-mode" data-value="classic"><span class="mode-icon">⌛</span><strong>Классический</strong><small>1 минута на ход. Очки копятся до финиша.</small></button>
-        <button class="mode-card ${draft.mode === 'custom' ? 'active' : ''}" data-action="set-mode" data-value="custom"><span class="mode-icon">⚡</span><strong>Кастом</strong><small>Свои настройки времени, темы и подсчёта очков.</small></button></div>
-      </section>
-      <section class="panel"><div class="panel-head"><h3><span class="step">2</span> Участники</h3><span class="mini-pill">${playStyle(draft) === 'pairs' ? 'от 3 игроков' : playStyle(draft) === 'versus' ? 'от 1 на команду' : 'от 2 на команду'}</span></div>
-        <div class="team-grid">${teamFields()}</div>${playStyle(draft) === 'pairs' ? `<button class="link-button" data-action="add-participant" ${draft.participants.length >= 12 ? 'disabled' : ''}>+ Добавить участника</button>` : playStyle(draft) === 'teams' ? `<button class="link-button" data-action="add-team" ${draft.teams.length >= 6 ? 'disabled' : ''}>+ Добавить команду</button>` : ''}
-      </section>
-      <section class="panel"><div class="panel-head"><h3><span class="step">3</span> Параметры игры</h3></div><p class="field-note">${playStyle(draft) === 'pairs' ? 'Один полный круг — все пары в обе стороны. Очки за слова и штрафы за пропуск получает только угадывающий. Финиш проверяется после полного круга.' : playStyle(draft) === 'versus' ? 'Все участники одной команды объясняют другой. Очки и штрафы получает только угадывающая команда. Раунд — два хода со сменой сторон.' : ''}${playStyle(draft) !== 'teams' && draft.mode === 'classic' ? ' Классический набор: минута на ход, пропуск −1. Ходы перехвата используются только в режиме «В своей команде».' : ''}</p>
-        ${draft.mode === 'custom' ? `<div class="field" style="margin-bottom:16px"><span>Таймер</span><div class="segmented">
-          <button class="${draft.timerMode === 'round' ? 'active' : ''}" data-action="set-timer-mode" data-value="round">На все слова хода</button>
-          <button class="${draft.timerMode === 'word' ? 'active' : ''}" data-action="set-timer-mode" data-value="word">На каждое слово</button></div></div>
-          <div class="field" style="margin-bottom:16px"><span>Как определить победителя</span><div class="segmented">
-          <button class="${draft.scoreMode === 'round' ? 'active' : ''}" data-action="set-score-mode" data-value="round">По итогам раунда</button>
-          <button class="${draft.scoreMode === 'target' ? 'active' : ''}" data-action="set-score-mode" data-value="target">До нужных очков</button></div></div>
-          <div class="field" style="margin-bottom:16px"><span>При ничьей</span><div class="segmented"><button class="${draft.tieMode !== 'sudden' ? 'active' : ''}" data-action="set-tie-mode" data-value="round">Полный раунд</button><button class="${draft.tieMode === 'sudden' ? 'active' : ''}" data-action="set-tie-mode" data-value="sudden">Решающее слово</button></div><small class="field-note">${draft.tieMode === 'sudden' ? 'Ведущий объясняет одно слово всем финалистам. Первый правильный ответ определяет победителя.' : playStyle(draft) === 'pairs' ? 'Ещё один полный круг всех пар.' : 'Каждая команда получает ещё по одному ходу.'}</small></div>
-          <p class="field-note">${draft.scoreMode === 'round' ? playStyle(draft) === 'pairs' ? 'Раунд включает все пары в обе стороны.' : 'В каждом раунде каждая команда играет один раз.' : 'Все команды играют одинаковое число ходов. После достижения цели круг доигрывается.'}</p>` : '<p class="field-note">На ход — 1 минута. Все участники доигрывают полный круг; при равном счёте на финише победителя определит решающее слово.</p>'}
-        <div class="field-grid">${draft.mode === 'classic' || draft.scoreMode === 'target' ? `<label class="field"><span>Игра до очков</span><input type="number" min="5" max="200" data-field="target-score" value="${draft.targetScore}"></label>` : ''}
-        ${draft.mode === 'custom' && draft.scoreMode === 'round' ? `<label class="field"><span>Раундов в партии</span><input type="number" min="2" max="20" data-field="round-count" value="${draft.roundCount}"></label>` : ''}
-        ${draft.mode === 'custom' ? `<label class="field"><span>${draft.timerMode === 'round' ? 'Секунд на все слова хода' : 'Секунд на каждое слово'}</span><input type="number" min="10" max="600" data-field="${draft.timerMode === 'round' ? 'round-seconds' : 'word-seconds'}" value="${draft.timerMode === 'round' ? draft.roundSeconds : draft.wordSeconds}"></label>` : ''}
-        <div class="field"><span>Темы</span><button class="category-select" data-action="open-categories" aria-haspopup="dialog" aria-controls="categories-dialog"><span id="category-button-label">${esc(categoryLabel())}</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg></button></div>
-        ${draft.mode === 'custom' ? `<label class="field"><span>Сложность</span><select data-field="difficulty"><option value="mixed" ${draft.difficulty === 'mixed' ? 'selected' : ''}>Смешанная</option><option value="easy" ${draft.difficulty === 'easy' ? 'selected' : ''}>Лёгкая</option><option value="medium" ${draft.difficulty === 'medium' ? 'selected' : ''}>Средняя</option><option value="hard" ${draft.difficulty === 'hard' ? 'selected' : ''}>Сложная</option></select></label>
-        <label class="field"><span>Штраф за пропуск</span><select data-field="skip-penalty"><option value="0" ${draft.skipPenalty === 0 ? 'selected' : ''}>Без штрафа</option><option value="1" ${draft.skipPenalty === 1 ? 'selected' : ''}>−1 очко</option></select></label>` : ''}</div>
-      </section>
-    </div>${setupSummary()}</div></main>${setupDialogs()}`;
+  const step=draft.setupStep||0;
+  const hints={teams:'Объясняйте своей команде.',pairs:'Личный счёт. Все пары по очереди.',versus:'Объясняйте другой команде.'};
+  const content=step===0?`<div class="wizard-style-cards">${PLAY_STYLES.map((style,index)=>`<button class="mode-card ${playStyle(draft)===style.id?'active':''}" data-action="set-play-style" data-value="${style.id}" aria-pressed="${playStyle(draft)===style.id}"><span class="choice-number" aria-hidden="true">0${index+1}</span><span><strong>${style.name}</strong><small>${hints[style.id]}</small></span><span class="choice-check" aria-hidden="true">${playStyle(draft)===style.id?'✓':'→'}</span></button>`).join('')}</div>`:step===1?setupPlayers():step===2?setupRules():step===3?setupWords():`<div id="setup-summary-values" class="setup-review">${setupSummaryDetails()}</div>`;
+  return `${header()}<main class="setup-wizard"><nav class="wizard-progress" aria-label="Шаги настройки">${SETUP_STEPS.map((name,index)=>`<button data-action="setup-step" data-step="${index}" ${index>draft.setupFurthest?'disabled':''} ${index===step?'aria-current="step"':''} aria-label="Шаг ${index+1}: ${name}"><span>${index<step?'✓':index+1}</span><small>${name}</small></button>`).join('')}</nav><section class="panel wizard-panel" aria-labelledby="setup-title"><div class="wizard-heading"><p class="wizard-kicker">Шаг ${step+1} из 5</p><h1 id="setup-title" tabindex="-1">${['Как играем?','Кто играет?','Какие правила?','Какие слова?','Всё готово?'][step]}</h1></div><div class="wizard-content">${content}</div><div id="setup-error" tabindex="-1"></div><div class="wizard-footer"><button class="button button-secondary" data-action="setup-prev">${step?'← Назад':'← На главную'}</button><button class="button button-primary" data-action="${step===4?'start-game':'setup-next'}">${step===4?'Начать игру ↗':'Далее →'}</button></div></section></main>${setupDialogs()}`;
+}
+function setupError(error) {
+  const node=root.querySelector('#setup-error');
+  if(node){node.innerHTML=`<div class="error-box" role="alert">${esc(error)}</div>`;node.focus({preventScroll:false});}
+}
+function validateSetupStep(step) {
+  return step===1?validateRoster():step===2?validateRules():step===3?validateWords():step===4?validateDraft():null;
+}
+function goSetupStep(target, fromHistory=false) {
+  target=clamp(target,0,4);
+  if(!fromHistory&&target>(draft.setupFurthest||0)+1)return;
+  if(!fromHistory&&target>(draft.setupStep||0)){
+    for(let step=0;step<target;step++){
+      const error=validateSetupStep(step);
+      if(error){draft.setupStep=step;render();setupError(error);return;}
+    }
+  }
+  draft.setupStep=target;draft.setupFurthest=Math.max(draft.setupFurthest||0,target);
+  render();root.querySelector('#setup-title')?.focus({preventScroll:false});
 }
 
 function renderScores() {
@@ -424,7 +437,7 @@ function render() {
     (replacement || controls.find(node=>!node.disabled && ['resume-timer','next-turn','last-word','stop-depleted'].includes(node.dataset.action)))?.focus({preventScroll:true});
   }
   updateTimer();
-  navigation?.sync(view);
+  navigation?.sync(view,draft.setupStep);
   persistUi();
 }
 
@@ -454,7 +467,7 @@ async function run(work) {
   finally { busy=false;persistCheckpoint();if(pauseRequested||document.hidden){pauseRequested=false;await pauseAndPersist();} }
 }
 
-function validateDraft() {
+function validateRoster() {
   const roster = entrants(draft), individual = playStyle(draft) === 'pairs';
   if (individual && (roster.length < 3 || roster.length > 12)) return 'Нужно от 3 до 12 участников.';
   if (!individual && (roster.length < 2 || roster.some(team => team.players.length < (playStyle(draft) === 'versus' ? 1 : 2)))) return playStyle(draft) === 'versus' ? 'Нужно две команды хотя бы по одному человеку.' : 'Нужно минимум две команды по два участника.';
@@ -462,13 +475,20 @@ function validateDraft() {
   if (roster.some(team => !team.name.trim()) || names.some(name => !name)) return 'Заполните имена участников и названия команд.';
   if (new Set(names).size !== names.length) return 'Имена участников должны различаться.';
   if (!individual && new Set(roster.map(team => team.name.trim().toLocaleLowerCase('ru'))).size !== roster.length) return 'Названия команд должны различаться.';
+  return null;
+}
+function validateRules() {
   if ((draft.mode === 'classic' || draft.scoreMode === 'target') && (!Number.isInteger(draft.targetScore) || draft.targetScore < 5 || draft.targetScore > 200)) return 'Цель по очкам должна быть от 5 до 200.';
   if (draft.mode === 'custom' && draft.scoreMode === 'round' && (!Number.isInteger(draft.roundCount) || draft.roundCount < 2 || draft.roundCount > 20)) return 'Число раундов должно быть от 2 до 20.';
   if (draft.mode === 'custom') { const seconds=draft.timerMode==='round'?draft.roundSeconds:draft.wordSeconds; if(!Number.isInteger(seconds)||seconds<10||seconds>600) return 'Время должно быть целым числом от 10 до 600 секунд.'; }
+  return null;
+}
+function validateWords() {
   const pool = WORDS.filter(word => !seen.has(word.family) && matchesWordSettings(word, draft));
   if (!pool.length) return 'В этом наборе больше нет новых слов. Выберите другую тему или сложность.';
   return null;
 }
+function validateDraft() { return validateRoster() || validateRules() || validateWords(); }
 
 function defaultRoles(team) {
   return { explainer: ((team.explainerStart ?? 0) + team.turns) % team.players.length };
@@ -623,8 +643,13 @@ async function handleAction(action, button) {
     return nextWord();
   }
   if (action.startsWith('install-')) return handleInstallAction(action);
+  if(action==='setup-next')return goSetupStep((draft.setupStep||0)+1);
+  if(action==='setup-step')return goSetupStep(Number(button.dataset.step));
+  if(action==='setup-prev'){if(draft.setupStep) return navigation?.back();return showHome();}
+  if(action==='repeat-settings'&&draft.previousSettings){pauseGame(game);if(game)await saveGame(game);draft={...draft,...settingsSnapshot(draft.previousSettings),setupStep:4,setupFurthest:4};view='setup';render();return;}
+  if(action==='confirm-history-import'&&pendingHistory&&view==='setup'){const preview=pendingHistory;await importSeen(preview.records);pendingHistory=null;seen=await getSeen();closeOverlay();render();showToast('История слов загружена');return;}
   if (action === 'back') return navigation?.back();
-  if (action === 'close-dialog') { closeOverlay(); return; }
+  if (action === 'close-dialog') { pendingHistory=null;closeOverlay(); return; }
   if (action === 'open-categories') { root.querySelector('#categories-dialog').showModal(); return; }
   if (action === 'categories-all') { draft.categories = []; draft.category = 'all'; refreshCategoryUi(); return; }
   if (action === 'open-colors') {
@@ -663,7 +688,7 @@ async function handleAction(action, button) {
     showToast(enabled ? 'Толкование отмечено' : 'Отметка отменена'); return;
   }
   if (action === 'home') return showHome();
-  if (action === 'new-game') { pauseGame(game); if (game) await saveGame(game); startingConfirmed = false; view = 'setup'; render(); return; }
+  if (action === 'new-game') { pauseGame(game); if (game) await saveGame(game); startingConfirmed = false; draft.setupStep=0;draft.setupFurthest=0;view = 'setup'; render(); return; }
   if (action === 'resume-game') { closeOverlay(); view = 'game'; if (game.phase === 'countdown') return beginCountdown(game.countdownNext || 'turn'); render(); return; }
   if (action === 'confirm-start') { startingConfirmed = true; return handleAction('start-game', button); }
   if (action === 'set-play-style') { draft.playStyle = ['pairs','versus'].includes(button.dataset.value) ? button.dataset.value : 'teams'; render(); return; }
@@ -682,11 +707,11 @@ async function handleAction(action, button) {
   if (action === 'remove-player') { draft.teams[Number(button.dataset.team)].players.splice(Number(button.dataset.player), 1); render(); return; }
   if (action === 'start-game') {
     const error = validateDraft();
-    if (error) { root.querySelector('#setup-error').innerHTML = `<div class="error-box">${esc(error)}</div>`; return; }
+    if (error) { setupError(error); return; }
     if (game && !['finished','roundFinished','drawFinished','stopped'].includes(game.phase) && !startingConfirmed) { root.querySelector('#new-game-dialog').showModal(); return; }
     startingConfirmed = false;
     game = {
-      ...structuredClone(draft), gameId:crypto.randomUUID(),_rev:observedRevision,
+      ...settingsSnapshot(draft), gameId:crypto.randomUUID(),_rev:observedRevision,
       categories: selectedCategories(draft), tieMode: draft.mode === 'classic' ? 'sudden' : draft.tieMode,
       teams: entrants(draft).map((team,index) => ({ ...structuredClone(team), color: teamColor(team,index), score: 0, turns: 0, stealNext: false, explainerStart: randomExplainer(team) })),
       activeTeam: Math.floor(Math.random() * entrants(draft).length), phase: 'handoff', roles: null, roundNumber: 1, roundHistory: [],
@@ -696,7 +721,7 @@ async function handleAction(action, button) {
     if (playStyle(game) === 'pairs') { game.pairSchedule = makePairSchedule(game.teams.length); game.pairIndex = 0; game.activeTeam = game.pairSchedule[0][1]; }
     game.roundStartTeam = game.activeTeam;
     game.roles = defaultRoles(activeTeam());
-    view = 'game'; await saveGame(game,{replace:true}); render(); return;
+    view = 'game'; await saveGame(game,{replace:true}); draft.previousSettings=settingsSnapshot(draft);render(); return;
   }
   if (action === 'start-turn' && game.phase === 'handoff') return beginCountdown();
   if (action === 'start-tiebreak' && ['roundTie','gameTie'].includes(game.phase)) {
@@ -788,6 +813,8 @@ root.addEventListener('click', event => {
   run(() => handleAction(button.dataset.action, button));
 });
 
+root.addEventListener('toggle',event=>{if(event.target.id==='rules-more'){draft.rulesExpanded=event.target.open;persistUi();}},true);
+
 root.addEventListener('input', event => {
   const input = event.target;
   const field = input.dataset.field;
@@ -809,10 +836,11 @@ root.addEventListener('change', event => {
   if (input.id === 'history-file') {
     run(async () => {
       const file = input.files?.[0]; if (!file) return;
-      const contents = JSON.parse(await file.text());
-      if (contents.format !== 'svoyi-slova-history-v1') throw new Error('Это не история слов игры');
-      await importSeen(contents.records);
-      seen = await getSeen(); render(); showToast('История слов восстановлена');
+      try {
+        pendingHistory=await readHistoryFile(file);
+        root.querySelector('#history-import-description').textContent=`Известных слов: ${pendingHistory.records.length}. ${pendingHistory.duplicates?`Повторов в файле: ${pendingHistory.duplicates}. `:''}${pendingHistory.unknown?`Неизвестных записей пропущено: ${pendingHistory.unknown}. `:''}Текущая партия сохранится.`;
+        root.querySelector('#history-import-dialog').showModal();
+      } finally { input.value=''; }
     });
     return;
   }
@@ -839,6 +867,7 @@ root.addEventListener('change', event => {
   if (view === 'setup' && ['category', 'difficulty', 'skip-penalty', ...Object.keys(numericFields)].includes(field)) {
     const summary = root.querySelector('#setup-summary-values');
     if (summary) summary.innerHTML = setupSummaryDetails();
+    const count=root.querySelector('#setup-word-count');if(count)count.textContent=freshWordCount().toLocaleString('ru');
   }
   persistUi();
 });
@@ -882,8 +911,15 @@ async function init() {
       draft.tieMode = draft.tieMode === 'sudden' ? 'sudden' : 'round';
     }
     draft=normaliseSettings(draft);
+    draft.setupStep=clamp(draft.setupStep,0,4);draft.setupFurthest=Math.max(draft.setupStep,clamp(draft.setupFurthest,0,4));
+    if(draft.previousSettings && (!Array.isArray(draft.previousSettings.teams)||!Array.isArray(draft.previousSettings.participants)))delete draft.previousSettings;
     game = backup?.game && (backup.game._rev||0)===record.revision && (!savedGame || gameIdentity(backup.game)===gameIdentity(savedGame)) && backup.savedAt >= (savedGame?.updatedAt || 0) ? backup.game : savedGame;
     committedGame=structuredClone(game);
+    if(game&&!draft.previousSettings){
+      draft.previousSettings=settingsSnapshot(game);
+      draft.previousSettings.teams=playStyle(game)==='pairs'?settingsSnapshot(draft).teams:game.teams.map(({id,name,players,color})=>({id,name,players,color}));
+      draft.previousSettings.participants=playStyle(game)==='pairs'?game.teams.map(({id,name,color})=>({id,name,color})):structuredClone(draft.participants);
+    }
     view = ['home','setup','game'].includes(ui?.view) ? ui.view : game && !['finished','roundFinished','drawFinished','stopped'].includes(game.phase) ? 'game' : 'home';
     if (view === 'game' && !game) view = 'home';
     restoreGame(game);
@@ -926,11 +962,12 @@ async function init() {
     if(game && ['suddenHandoff','suddenWord'].includes(game.phase)&&needsFullCircle()){game.phase=game.mode==='custom'&&game.scoreMode==='round'?'roundTie':'gameTie';game.word=null;await saveGame(game);}
     if(game)await saveGame(game);
     ready = true;
-    navigation = createNavigation(view, next => {
+    navigation = createNavigation(view, (next,step) => {
       if (view === 'game' && next !== 'game') { pauseAndPersist(); }
       view = next === 'game' && !game ? 'setup' : next;
+      if(view==='setup'&&Number.isInteger(step)){draft.setupStep=clamp(step,0,4);draft.setupFurthest=Math.max(draft.setupFurthest,draft.setupStep);}
       render();
-    }, closeOverlay, () => showToast('Вы на главном экране'));
+    }, closeOverlay, () => showToast('Вы на главном экране'),draft.setupStep);
     render();
     requestPersistentStorage();
     initPwa(() => {

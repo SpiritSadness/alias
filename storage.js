@@ -1,5 +1,6 @@
-import { isValidGame, gameIdentity } from './session.js?v=23';
-import { canonicalFamily } from './words.js?v=23';
+import { isValidGame, gameIdentity } from './session.js?v=24';
+import { prepareHistory } from './history.js?v=24';
+import { canonicalFamily } from './words.js?v=24';
 
 const DB_NAME = 'svoyi-slova-v1';
 let opening;
@@ -23,11 +24,12 @@ function openDb() {
 function transactionResult(db, storeName, mode, work) {
   return new Promise((resolve, reject) => {
     const tx = db.transaction(storeName, mode);
-    let result;
+    let result, failure;
     tx.oncomplete = () => resolve(result);
-    tx.onerror = () => reject(tx.error);
-    tx.onabort = () => reject(tx.error || new Error('Операция с памятью отменена'));
-    work(tx.objectStore(storeName), value => { result = value; });
+    tx.onerror = () => reject(failure || tx.error);
+    tx.onabort = () => reject(failure || tx.error || new Error('Операция с памятью отменена'));
+    try { work(tx.objectStore(storeName), value => { result = value; }); }
+    catch (error) { failure = error; tx.abort(); }
   });
 }
 
@@ -123,17 +125,13 @@ export async function exportSeen() {
 }
 
 export async function importSeen(records) {
-  if (!Array.isArray(records) || records.some(item => typeof item?.family !== 'string')) {
-    throw new Error('Файл истории имеет неверный формат');
-  }
+  // Validate the whole batch before opening a write transaction.
+  const prepared = prepareHistory(records);
   const db = await openDb();
   await transactionResult(db, 'seen', 'readwrite', store => {
-    for (const record of records) store.put({
-      family: canonicalFamily(record.family),
-      firstSeenAt: typeof record.firstSeenAt === 'string' ? record.firstSeenAt : new Date().toISOString()
-    });
+    for (const record of prepared.records) store.put(record);
   });
-  return records.length;
+  return prepared.records.length;
 }
 
 export async function requestPersistentStorage() {
