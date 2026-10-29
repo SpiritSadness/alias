@@ -13,7 +13,7 @@ if (window.self !== window.top) {
   panel.append(title,link);
   document.querySelector('#app').replaceChildren(panel);
 } else {
-  import('./app.js?v=24').catch(error => {
+  import('./app.js?v=25').catch(error => {
     console.error(error);
     document.querySelector('#app').textContent = 'Не удалось загрузить игру. Обновите страницу.';
   });

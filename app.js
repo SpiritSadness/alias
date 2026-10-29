@@ -1,7 +1,7 @@
 import { readHistoryFile } from './history.js?v=24';
 import { PACKS, WORDS } from './words.js?v=24';
 import { getSeen, saveGameAndReserveWord, getGameRecord, saveGame as storeGame, getSession, saveSession, getDefinitionReports, reportDefinition, exportSeen, importSeen, requestPersistentStorage } from './storage.js?v=24';
-import { renderInstallHint, handleInstallAction, initPwa } from './pwa.js?v=24';
+import { renderInstallHint, handleInstallAction, initPwa } from './pwa.js?v=25';
 import { renderPreferences, togglePreference, unlockAudio, playSound } from './preferences.js?v=19';
 import { matchesWordSettings, buildTurnSummary, TEAM_COLORS, teamColor, selectedCategories, tieContenders, targetOutcome, additionalTurnChanges } from './game-rules.js?v=24';
 import { pauseGame, readCheckpoint, writeCheckpoint, restoreGame, gameIdentity, normaliseSettings } from './session.js?v=24';
@@ -99,7 +99,7 @@ function header() {
     <a class="brand" href="#home" data-action="home" aria-label="Alias — на главную"><img class="brand-logo" src="./icon.svg?v=18" width="40" height="40" alt=""><span>Alias</span></a>
     <div class="top-actions">
     <span class="preference-buttons">${renderPreferences()}</span>
-    ${view !== 'home' ? '<button class="icon-button" type="button" data-action="back" aria-label="Назад">←</button>' : ''}</div>
+    ${view !== 'home' && view !== 'setup' ? '<button class="icon-button" type="button" data-action="back" aria-label="Назад">←</button>' : ''}</div>
   </header>`;
 }
 
@@ -197,7 +197,7 @@ function renderSetup() {
   const step=draft.setupStep||0;
   const hints={teams:'Объясняйте своей команде.',pairs:'Личный счёт. Все пары по очереди.',versus:'Объясняйте другой команде.'};
   const content=step===0?`<div class="wizard-style-cards">${PLAY_STYLES.map((style,index)=>`<button class="mode-card ${playStyle(draft)===style.id?'active':''}" data-action="set-play-style" data-value="${style.id}" aria-pressed="${playStyle(draft)===style.id}"><span class="choice-number" aria-hidden="true">0${index+1}</span><span><strong>${style.name}</strong><small>${hints[style.id]}</small></span><span class="choice-check" aria-hidden="true">${playStyle(draft)===style.id?'✓':'→'}</span></button>`).join('')}</div>`:step===1?setupPlayers():step===2?setupRules():step===3?setupWords():`<div id="setup-summary-values" class="setup-review">${setupSummaryDetails()}</div>`;
-  return `${header()}<main class="setup-wizard"><nav class="wizard-progress" aria-label="Шаги настройки">${SETUP_STEPS.map((name,index)=>`<button data-action="setup-step" data-step="${index}" ${index>draft.setupFurthest?'disabled':''} ${index===step?'aria-current="step"':''} aria-label="Шаг ${index+1}: ${name}"><span>${index<step?'✓':index+1}</span><small>${name}</small></button>`).join('')}</nav><section class="panel wizard-panel" aria-labelledby="setup-title"><div class="wizard-heading"><p class="wizard-kicker">Шаг ${step+1} из 5</p><h1 id="setup-title" tabindex="-1">${['Как играем?','Кто играет?','Какие правила?','Какие слова?','Всё готово?'][step]}</h1></div><div class="wizard-content">${content}</div><div id="setup-error" tabindex="-1"></div><div class="wizard-footer"><button class="button button-secondary" data-action="setup-prev">${step?'← Назад':'← На главную'}</button><button class="button button-primary" data-action="${step===4?'start-game':'setup-next'}">${step===4?'Начать игру ↗':'Далее →'}</button></div></section></main>${setupDialogs()}`;
+  return `${header()}<main class="setup-wizard"><nav class="wizard-progress" aria-label="Шаги настройки">${SETUP_STEPS.map((name,index)=>`<button data-action="setup-step" data-step="${index}" ${index>draft.setupFurthest?'disabled':''} ${index===step?'aria-current="step"':''} aria-label="Шаг ${index+1}: ${name}"><span>${index<step?'✓':index+1}</span><small>${name}</small></button>`).join('')}</nav><section class="panel wizard-panel" aria-labelledby="setup-title"><div class="wizard-heading"><p class="wizard-kicker">Шаг ${step+1} из 5</p><h1 id="setup-title" tabindex="-1">${['Как играем?','Кто играет?','Какие правила?','Какие слова?','Всё готово?'][step]}</h1></div><div class="wizard-content">${content}</div><div id="setup-error" tabindex="-1"></div></section><div class="wizard-footer" role="group" aria-label="Переход между шагами"><button class="button button-secondary" data-action="setup-prev">${step?'← Назад':'← На главную'}</button><button class="button button-primary" data-action="${step===4?'start-game':'setup-next'}">${step===4?'Начать игру ↗':'Далее →'}</button></div></main>${setupDialogs()}`;
 }
 function setupError(error) {
   const node=root.querySelector('#setup-error');

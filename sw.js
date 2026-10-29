@@ -1,5 +1,5 @@
-const CACHE = 'alias-static-v25';
-const FILES = ["./appearance.js?v=24", "./entry.js?v=24", "./history.js?v=24", "./play-modes.js?v=24", "./review.js?v=24", "./", "./index.html", "./styles.css?v=24", "./app.js?v=24", "./game-rules.js?v=24", "./storage.js?v=24", "./pwa.js?v=24", "./preferences.js?v=19", "./session.js?v=24", "./navigation.js?v=24", "./definitions.js?v=24", "./manifest.webmanifest?v=18", "./icon.svg?v=18", "./words.js?v=24", "./word-bank.js?v=24", "./icon-192-v18.png", "./icon-512-v18.png", "./icon-maskable-v18.png", "./apple-touch-icon-v18.png", "./word-data-notice.txt"];
+const CACHE = 'alias-static-v26';
+const FILES = ["./appearance.js?v=24", "./entry.js?v=25", "./history.js?v=24", "./play-modes.js?v=24", "./review.js?v=24", "./", "./index.html", "./styles.css?v=25", "./app.js?v=25", "./game-rules.js?v=24", "./storage.js?v=24", "./pwa.js?v=25", "./preferences.js?v=19", "./session.js?v=24", "./navigation.js?v=24", "./definitions.js?v=24", "./manifest.webmanifest?v=18", "./icon.svg?v=18", "./words.js?v=24", "./word-bank.js?v=24", "./icon-192-v18.png", "./icon-512-v18.png", "./icon-maskable-v18.png", "./apple-touch-icon-v18.png", "./word-data-notice.txt"];
 
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(FILES)).then(() => self.skipWaiting()));

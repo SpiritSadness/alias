@@ -69,7 +69,7 @@ export async function initPwa(callback) {
   onChange = callback;
   if (!('serviceWorker' in navigator)) return;
   try {
-    const registration = await navigator.serviceWorker.register('./sw.js?v=24');
+    const registration = await navigator.serviceWorker.register('./sw.js?v=25');
     await navigator.serviceWorker.ready;
     await checkOffline(registration);
     navigator.serviceWorker.addEventListener('controllerchange', () => checkOffline(registration));
